@@ -3,17 +3,21 @@ const controller = require('../controllers/proforma.controller');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/role');
 const { validate } = require('../middleware/validate');
-const { proformaSchema, statusSchema } = require('../schemas/proforma.schema');
+const { proformaSchema, approveSchema, rejectSchema } = require('../schemas/proforma.schema');
 
 const router = Router();
 
-router.use(requireAuth, requireRole('admin', 'manager', 'user'));
+router.use(requireAuth);
 
-router.post('/', validate(proformaSchema), controller.create);
 router.get('/', controller.list);
+router.post('/', requireRole('sales', 'admin'), validate(proformaSchema), controller.create);
 router.get('/:id', controller.getOne);
-router.put('/:id', validate(proformaSchema), controller.update);
-router.patch('/:id/status', validate(statusSchema), controller.updateStatus);
-router.delete('/:id', controller.remove);
+router.get('/:id/history', controller.history);
+router.get('/:id/pdf', controller.pdf);
+router.put('/:id', requireRole('sales', 'admin'), validate(proformaSchema), controller.update);
+router.post('/:id/submit', requireRole('sales', 'admin'), controller.submit);
+router.post('/:id/approve', requireRole('supervisor', 'admin'), validate(approveSchema), controller.approve);
+router.post('/:id/reject', requireRole('supervisor', 'admin'), validate(rejectSchema), controller.reject);
+router.delete('/:id', requireRole('sales', 'admin'), controller.remove);
 
 module.exports = router;

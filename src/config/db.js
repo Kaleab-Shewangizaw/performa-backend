@@ -1,11 +1,14 @@
-const { Pool } = require('pg');
+const mongoose = require('mongoose');
 const env = require('./env');
 
-const pool = new Pool({
-  connectionString: env.databaseUrl,
-});
+async function connectDb() {
+  mongoose.set('strictQuery', true);
+  await mongoose.connect(env.mongodbUri);
+  return mongoose.connection;
+}
 
-module.exports = {
-  pool,
-  query: (text, params) => pool.query(text, params),
-};
+async function disconnectDb() {
+  await mongoose.disconnect();
+}
+
+module.exports = { connectDb, disconnectDb };

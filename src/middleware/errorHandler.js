@@ -9,8 +9,18 @@ function errorHandler(err, req, res, next) {
     return res.status(err.statusCode).json({ error: err.message, details: err.details });
   }
 
-  if (err.code === '23505') {
-    return res.status(409).json({ error: 'Resource already exists' });
+  // Mongo duplicate key
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue || {})[0] || 'field';
+    return res.status(409).json({ error: `A record with this ${field} already exists` });
+  }
+
+  // Mongoose bad ObjectId / validation
+  if (err.name === 'CastError') {
+    return res.status(400).json({ error: 'Invalid id format' });
+  }
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ error: err.message });
   }
 
   console.error(err);

@@ -1,15 +1,10 @@
 const ApiError = require('../utils/apiError');
 const asyncHandler = require('../utils/asyncHandler');
-const userModel = require('../models/user.model');
-const refreshTokenModel = require('../models/refreshToken.model');
+const User = require('../models/user.model');
+const RefreshToken = require('../models/refreshToken.model');
 const { hashPassword, comparePassword, hashToken } = require('../utils/password');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const env = require('../config/env');
-
-function serializeUser(user) {
-  const { password_hash, ...rest } = user;
-  return rest;
-}
 
 function expiresInMs(expiresIn) {
   const match = /^(\d+)([smhd])$/.exec(expiresIn);
@@ -23,8 +18,8 @@ async function issueTokens(user) {
   const accessToken = signAccessToken(user);
   const refreshToken = signRefreshToken(user);
 
-  await refreshTokenModel.store({
-    userId: user.id,
+  await RefreshToken.create({
+    user: user.id,
     tokenHash: hashToken(refreshToken),
     expiresAt: new Date(Date.now() + expiresInMs(env.jwt.refreshExpiresIn)),
   });
@@ -35,13 +30,21 @@ async function issueTokens(user) {
 const register = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
-  const existing = await userModel.findByEmail(email);
+  const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {
     throw new ApiError(409, 'An account with this email already exists');
   }
 
+  // First registered user becomes admin so the system can be bootstrapped;
+  // everyone after that starts as sales.
+  const isFirstUser = (await User.estimatedDocumentCount()) === 0;
   const passwordHash = await hashPassword(password);
-  const user = await userModel.createUser({ name, email, passwordHash, role: 'user' });
+  const user = await User.create({
+    name,
+    email,
+    passwordHash,
+    role: isFirstUser ? 'admin' : 'sales',
+  });
   const tokens = await issueTokens(user);
 
   res.status(201).json({ user, ...tokens });
@@ -50,18 +53,18 @@ const register = asyncHandler(async (req, res) => {
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
-  const user = await userModel.findByEmail(email);
-  if (!user || !user.is_active) {
+  const user = await User.findOne({ email: email.toLowerCase() });
+  if (!user || !user.isActive) {
     throw new ApiError(401, 'Invalid email or password');
   }
 
-  const valid = await comparePassword(password, user.password_hash);
+  const valid = await comparePassword(password, user.passwordHash);
   if (!valid) {
     throw new ApiError(401, 'Invalid email or password');
   }
 
   const tokens = await issueTokens(user);
-  res.json({ user: serializeUser(user), ...tokens });
+  res.json({ user, ...tokens });
 });
 
 const refresh = asyncHandler(async (req, res) => {
@@ -75,17 +78,22 @@ const refresh = asyncHandler(async (req, res) => {
   }
 
   const tokenHash = hashToken(refreshToken);
-  const stored = await refreshTokenModel.findActiveByHash(tokenHash);
+  const stored = await RefreshToken.findOne({
+    tokenHash,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  });
   if (!stored) {
     throw new ApiError(401, 'Refresh token has been revoked or is invalid');
   }
 
-  const user = await userModel.findById(payload.sub);
-  if (!user || !user.is_active) {
+  const user = await User.findById(payload.sub);
+  if (!user || !user.isActive) {
     throw new ApiError(401, 'User no longer exists or is inactive');
   }
 
-  await refreshTokenModel.revokeByHash(tokenHash);
+  stored.revokedAt = new Date();
+  await stored.save();
   const tokens = await issueTokens(user);
 
   res.json({ user, ...tokens });
@@ -94,7 +102,10 @@ const refresh = asyncHandler(async (req, res) => {
 const logout = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
-    await refreshTokenModel.revokeByHash(hashToken(refreshToken));
+    await RefreshToken.updateOne(
+      { tokenHash: hashToken(refreshToken) },
+      { revokedAt: new Date() }
+    );
   }
   res.status(204).send();
 });
