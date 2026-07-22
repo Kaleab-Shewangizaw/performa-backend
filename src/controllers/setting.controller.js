@@ -1,15 +1,13 @@
 const asyncHandler = require('../utils/asyncHandler');
-const Setting = require('../models/setting.model');
+const settingModel = require('../models/setting.model');
 
 const get = asyncHandler(async (req, res) => {
-  const settings = await Setting.get();
+  const settings = await settingModel.get();
   res.json({ settings });
 });
 
 const update = asyncHandler(async (req, res) => {
-  const settings = await Setting.get();
-  Object.assign(settings, req.body);
-  await settings.save();
+  const settings = await settingModel.update(req.body);
   res.json({ settings });
 });
 

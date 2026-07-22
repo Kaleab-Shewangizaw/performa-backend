@@ -1,14 +1,30 @@
-const mongoose = require('mongoose');
+const { Pool } = require('pg');
 const env = require('./env');
 
-async function connectDb() {
-  mongoose.set('strictQuery', true);
-  await mongoose.connect(env.mongodbUri);
-  return mongoose.connection;
+const pool = new Pool({ connectionString: env.databaseUrl });
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle Postgres client', err);
+});
+
+// Runs `fn` inside a transaction, rolling back on any throw.
+async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-async function disconnectDb() {
-  await mongoose.disconnect();
-}
-
-module.exports = { connectDb, disconnectDb };
+module.exports = {
+  pool,
+  query: (text, params) => pool.query(text, params),
+  withTransaction,
+};

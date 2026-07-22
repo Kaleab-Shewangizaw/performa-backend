@@ -1,13 +1,13 @@
 const { Router } = require('express');
-const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
+const { query } = require('../config/db');
 
 const router = Router();
 
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    await mongoose.connection.db.admin().ping();
+    await query('SELECT 1');
     res.json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
   })
 );

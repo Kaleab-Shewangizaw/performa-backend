@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const required = [
-  'MONGODB_URI',
+  'DATABASE_URL',
   'JWT_ACCESS_SECRET',
   'JWT_REFRESH_SECRET',
 ];
@@ -15,7 +15,7 @@ for (const key of required) {
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
-  mongodbUri: process.env.MONGODB_URI,
+  databaseUrl: process.env.DATABASE_URL,
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,

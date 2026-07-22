@@ -1,7 +1,7 @@
-const Notification = require('../models/notification.model');
+const notificationModel = require('../models/notification.model');
 
-async function notify(userId, { type, message, proforma }) {
-  return Notification.create({ user: userId, type, message, proforma });
+async function notify(userId, { type, message, proformaId }) {
+  return notificationModel.create({ userId, type, message, proformaId });
 }
 
 module.exports = { notify };

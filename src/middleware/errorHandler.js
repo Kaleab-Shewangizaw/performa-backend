@@ -9,18 +9,18 @@ function errorHandler(err, req, res, next) {
     return res.status(err.statusCode).json({ error: err.message, details: err.details });
   }
 
-  // Mongo duplicate key
-  if (err.code === 11000) {
-    const field = Object.keys(err.keyValue || {})[0] || 'field';
-    return res.status(409).json({ error: `A record with this ${field} already exists` });
-  }
-
-  // Mongoose bad ObjectId / validation
-  if (err.name === 'CastError') {
-    return res.status(400).json({ error: 'Invalid id format' });
-  }
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({ error: err.message });
+  // Postgres error codes
+  switch (err.code) {
+    case '23505': // unique_violation
+      return res.status(409).json({ error: 'A record with these details already exists' });
+    case '23503': // foreign_key_violation
+      return res.status(400).json({ error: 'Referenced record does not exist or is still in use' });
+    case '23514': // check_violation
+      return res.status(400).json({ error: 'A value is outside the allowed range' });
+    case '22P02': // invalid_text_representation
+      return res.status(400).json({ error: 'Invalid value format' });
+    default:
+      break;
   }
 
   console.error(err);

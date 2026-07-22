@@ -1,61 +1,66 @@
 const ApiError = require('../utils/apiError');
 const asyncHandler = require('../utils/asyncHandler');
-const User = require('../models/user.model');
+const userModel = require('../models/user.model');
 const { hashPassword } = require('../utils/password');
-const { parsePagination, parseSort, paginatedList, escapeRegex } = require('../utils/query');
+const { parsePagination, parseSort, buildPagination } = require('../utils/query');
+
+const SORTABLE = {
+  name: 'name',
+  email: 'email',
+  role: 'role',
+  createdAt: 'created_at',
+};
 
 const list = asyncHandler(async (req, res) => {
-  const { page, limit, skip } = parsePagination(req.query);
-  const sort = parseSort(req.query, ['name', 'email', 'role', 'createdAt']);
+  const { page, limit, offset } = parsePagination(req.query);
+  const sort = parseSort(req.query, SORTABLE);
 
-  const filter = {};
-  if (req.query.role) filter.role = req.query.role;
-  if (req.query.q) {
-    const rx = new RegExp(escapeRegex(req.query.q), 'i');
-    filter.$or = [{ name: rx }, { email: rx }];
-  }
-
-  const { data, pagination } = await paginatedList(User, { filter, sort, page, limit, skip });
-  res.json({ users: data, pagination });
+  const { data, total } = await userModel.list({
+    role: req.query.role,
+    search: req.query.q,
+    sort,
+    limit,
+    offset,
+  });
+  res.json({ users: data, pagination: buildPagination({ page, limit, total }) });
 });
 
 const create = asyncHandler(async (req, res) => {
   const { name, email, password, role } = req.body;
 
-  const existing = await User.findOne({ email: email.toLowerCase() });
-  if (existing) {
+  if (await userModel.existsByEmail(email)) {
     throw new ApiError(409, 'An account with this email already exists');
   }
 
   const passwordHash = await hashPassword(password);
-  const user = await User.create({ name, email, passwordHash, role });
+  const user = await userModel.create({ name, email, passwordHash, role });
   res.status(201).json({ user });
 });
 
 const getOne = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
+  const user = await userModel.findById(req.params.id);
   if (!user) throw new ApiError(404, 'User not found');
   res.json({ user });
 });
 
 const update = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
-  if (!user) throw new ApiError(404, 'User not found');
+  const existing = await userModel.findById(req.params.id);
+  if (!existing) throw new ApiError(404, 'User not found');
 
   const { name, email, password, role } = req.body;
-  if (role && user.id === req.user.id && role !== 'admin') {
+  if (role && existing.id === req.user.id && role !== 'admin') {
     throw new ApiError(400, 'You cannot demote your own account');
   }
-  if (email && email.toLowerCase() !== user.email) {
-    const existing = await User.findOne({ email: email.toLowerCase() });
-    if (existing) throw new ApiError(409, 'An account with this email already exists');
-    user.email = email;
+  if (email && email.toLowerCase() !== existing.email && (await userModel.existsByEmail(email))) {
+    throw new ApiError(409, 'An account with this email already exists');
   }
-  if (name) user.name = name;
-  if (role) user.role = role;
-  if (password) user.passwordHash = await hashPassword(password);
 
-  await user.save();
+  const user = await userModel.update(existing.id, {
+    name,
+    email,
+    role,
+    passwordHash: password ? await hashPassword(password) : undefined,
+  });
   res.json({ user });
 });
 
@@ -64,13 +69,13 @@ const deactivate = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'You cannot deactivate your own account');
   }
 
-  const user = await User.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+  const user = await userModel.setActive(req.params.id, false);
   if (!user) throw new ApiError(404, 'User not found');
   res.json({ user });
 });
 
 const reactivate = asyncHandler(async (req, res) => {
-  const user = await User.findByIdAndUpdate(req.params.id, { isActive: true }, { new: true });
+  const user = await userModel.setActive(req.params.id, true);
   if (!user) throw new ApiError(404, 'User not found');
   res.json({ user });
 });

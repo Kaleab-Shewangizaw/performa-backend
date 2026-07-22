@@ -3,6 +3,7 @@ const controller = require('../controllers/proforma.controller');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/role');
 const { validate } = require('../middleware/validate');
+const { parseId } = require('../middleware/parseId');
 const { proformaSchema, approveSchema, rejectSchema } = require('../schemas/proforma.schema');
 
 const router = Router();
@@ -11,6 +12,8 @@ router.use(requireAuth);
 
 router.get('/', controller.list);
 router.post('/', requireRole('sales', 'admin'), validate(proformaSchema), controller.create);
+
+router.use('/:id', parseId());
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
 router.get('/:id/pdf', controller.pdf);

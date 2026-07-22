@@ -1,10 +1,15 @@
 const ApiError = require('../utils/apiError');
 const asyncHandler = require('../utils/asyncHandler');
-const User = require('../models/user.model');
-const RefreshToken = require('../models/refreshToken.model');
+const userModel = require('../models/user.model');
+const refreshTokenModel = require('../models/refreshToken.model');
 const { hashPassword, comparePassword, hashToken } = require('../utils/password');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const env = require('../config/env');
+
+function serializeUser(user) {
+  const { passwordHash, ...rest } = user;
+  return rest;
+}
 
 function expiresInMs(expiresIn) {
   const match = /^(\d+)([smhd])$/.exec(expiresIn);
@@ -18,8 +23,8 @@ async function issueTokens(user) {
   const accessToken = signAccessToken(user);
   const refreshToken = signRefreshToken(user);
 
-  await RefreshToken.create({
-    user: user.id,
+  await refreshTokenModel.store({
+    userId: user.id,
     tokenHash: hashToken(refreshToken),
     expiresAt: new Date(Date.now() + expiresInMs(env.jwt.refreshExpiresIn)),
   });
@@ -30,16 +35,15 @@ async function issueTokens(user) {
 const register = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
-  const existing = await User.findOne({ email: email.toLowerCase() });
-  if (existing) {
+  if (await userModel.existsByEmail(email)) {
     throw new ApiError(409, 'An account with this email already exists');
   }
 
   // First registered user becomes admin so the system can be bootstrapped;
   // everyone after that starts as sales.
-  const isFirstUser = (await User.estimatedDocumentCount()) === 0;
+  const isFirstUser = (await userModel.count()) === 0;
   const passwordHash = await hashPassword(password);
-  const user = await User.create({
+  const user = await userModel.create({
     name,
     email,
     passwordHash,
@@ -53,7 +57,7 @@ const register = asyncHandler(async (req, res) => {
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const user = await userModel.findByEmailWithPassword(email);
   if (!user || !user.isActive) {
     throw new ApiError(401, 'Invalid email or password');
   }
@@ -64,7 +68,7 @@ const login = asyncHandler(async (req, res) => {
   }
 
   const tokens = await issueTokens(user);
-  res.json({ user, ...tokens });
+  res.json({ user: serializeUser(user), ...tokens });
 });
 
 const refresh = asyncHandler(async (req, res) => {
@@ -78,22 +82,17 @@ const refresh = asyncHandler(async (req, res) => {
   }
 
   const tokenHash = hashToken(refreshToken);
-  const stored = await RefreshToken.findOne({
-    tokenHash,
-    revokedAt: null,
-    expiresAt: { $gt: new Date() },
-  });
+  const stored = await refreshTokenModel.findActiveByHash(tokenHash);
   if (!stored) {
     throw new ApiError(401, 'Refresh token has been revoked or is invalid');
   }
 
-  const user = await User.findById(payload.sub);
+  const user = await userModel.findById(payload.sub);
   if (!user || !user.isActive) {
     throw new ApiError(401, 'User no longer exists or is inactive');
   }
 
-  stored.revokedAt = new Date();
-  await stored.save();
+  await refreshTokenModel.revokeByHash(tokenHash);
   const tokens = await issueTokens(user);
 
   res.json({ user, ...tokens });
@@ -102,10 +101,7 @@ const refresh = asyncHandler(async (req, res) => {
 const logout = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
-    await RefreshToken.updateOne(
-      { tokenHash: hashToken(refreshToken) },
-      { revokedAt: new Date() }
-    );
+    await refreshTokenModel.revokeByHash(hashToken(refreshToken));
   }
   res.status(204).send();
 });

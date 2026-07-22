@@ -1,10 +1,9 @@
 const ApiError = require('../utils/apiError');
-const Proforma = require('../models/proforma.model');
-const Product = require('../models/product.model');
-const Customer = require('../models/customer.model');
-const Counter = require('../models/counter.model');
-const Setting = require('../models/setting.model');
-const ApprovalHistory = require('../models/approvalHistory.model');
+const proformaModel = require('../models/proforma.model');
+const productModel = require('../models/product.model');
+const customerModel = require('../models/customer.model');
+const settingModel = require('../models/setting.model');
+const approvalHistoryModel = require('../models/approvalHistory.model');
 const notificationService = require('./notification.service');
 const { EDITABLE_STATUSES } = require('../utils/constants');
 
@@ -12,11 +11,11 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// Builds embedded item docs from request items, denormalizing product data
-// and computing area + line totals server-side.
+// Builds item rows from request items, denormalizing product data and
+// computing area + line totals server-side.
 async function buildItems(items) {
   const productIds = [...new Set(items.map((i) => i.productId))];
-  const products = await Product.find({ _id: { $in: productIds } });
+  const products = await productModel.findByIds(productIds);
   const byId = new Map(products.map((p) => [p.id, p]));
 
   return items.map((item) => {
@@ -34,7 +33,7 @@ async function buildItems(items) {
     const area = round2(item.width * item.height);
     const unitPrice = item.unitPrice ?? product.defaultUnitPrice;
     return {
-      product: product._id,
+      productId: product.id,
       productName: product.name,
       stoneCategory: product.stoneCategory,
       stoneColor: product.stoneColor,
@@ -59,18 +58,15 @@ function computeTotals(items, discount, vatRate) {
   return { subtotal, discount: cappedDiscount, vatAmount, grandTotal };
 }
 
-async function nextProformaNumber() {
-  const settings = await Setting.get();
-  const year = new Date().getFullYear();
-  const seq = await Counter.next(`proforma-${year}`);
-  return `${settings.proformaPrefix}-${year}-${String(seq).padStart(4, '0')}`;
+function toDateOnly(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 async function createProforma(data, user) {
-  const customer = await Customer.findById(data.customerId);
+  const customer = await customerModel.findById(data.customerId);
   if (!customer) throw new ApiError(400, 'Customer not found');
 
-  const settings = await Setting.get();
+  const settings = await settingModel.get();
   const items = await buildItems(data.items);
   const vatRate = data.vatRate ?? settings.defaultVatRate;
   const totals = computeTotals(items, data.discount || 0, vatRate);
@@ -80,12 +76,17 @@ async function createProforma(data, user) {
     ? new Date(data.expiryDate)
     : new Date(issueDate.getTime() + settings.defaultValidityDays * 86400000);
 
-  const proforma = await Proforma.create({
-    proformaNumber: await nextProformaNumber(),
-    customer: customer._id,
-    salesPerson: user.id,
-    issueDate,
-    expiryDate,
+  const proformaNumber = await proformaModel.nextNumber(
+    settings.proformaPrefix,
+    new Date().getFullYear()
+  );
+
+  const proforma = await proformaModel.create({
+    proformaNumber,
+    customerId: customer.id,
+    salesPersonId: user.id,
+    issueDate: toDateOnly(issueDate),
+    expiryDate: toDateOnly(expiryDate),
     items,
     vatRate,
     ...totals,
@@ -96,18 +97,18 @@ async function createProforma(data, user) {
     status: data.asDraft ? 'draft' : 'pending',
   });
 
-  await ApprovalHistory.create({
-    proforma: proforma._id,
+  await approvalHistoryModel.create({
+    proformaId: proforma.id,
     action: data.asDraft ? 'created' : 'submitted',
-    actor: user.id,
+    actorId: user.id,
   });
 
-  return proforma.populate(['customer', 'salesPerson']);
+  return proforma;
 }
 
 function assertEditable(proforma, user) {
   if (user.role === 'sales') {
-    if (String(proforma.salesPerson._id || proforma.salesPerson) !== String(user.id)) {
+    if (proforma.salesPerson.id !== user.id) {
       throw new ApiError(403, 'You can only edit your own proformas');
     }
     if (!EDITABLE_STATUSES.includes(proforma.status)) {
@@ -119,82 +120,84 @@ function assertEditable(proforma, user) {
 async function updateProforma(proforma, data, user) {
   assertEditable(proforma, user);
 
+  let customerId = proforma.customerId;
   if (data.customerId) {
-    const customer = await Customer.findById(data.customerId);
+    const customer = await customerModel.findById(data.customerId);
     if (!customer) throw new ApiError(400, 'Customer not found');
-    proforma.customer = customer._id;
+    customerId = customer.id;
   }
 
   const items = await buildItems(data.items);
   const vatRate = data.vatRate ?? proforma.vatRate;
   const totals = computeTotals(items, data.discount || 0, vatRate);
 
-  Object.assign(proforma, {
+  // A rejected proforma that gets edited goes back to pending review;
+  // a draft is submitted only when explicitly asked.
+  let status = proforma.status;
+  let rejectionReason = proforma.rejectionReason;
+  if (status === 'rejected') {
+    status = 'pending';
+    rejectionReason = '';
+  } else if (status === 'draft' && data.submit) {
+    status = 'pending';
+  }
+
+  const updated = await proformaModel.replaceItemsAndTotals(proforma.id, {
+    customerId,
+    issueDate: data.issueDate || toDateOnly(new Date(proforma.issueDate)),
+    expiryDate: data.expiryDate || toDateOnly(new Date(proforma.expiryDate)),
     items,
     vatRate,
     ...totals,
-    issueDate: data.issueDate ? new Date(data.issueDate) : proforma.issueDate,
-    expiryDate: data.expiryDate ? new Date(data.expiryDate) : proforma.expiryDate,
     paymentTerms: data.paymentTerms ?? proforma.paymentTerms,
     deliveryTime: data.deliveryTime ?? proforma.deliveryTime,
     validityPeriod: data.validityPeriod ?? proforma.validityPeriod,
     notes: data.notes ?? proforma.notes,
+    status,
+    rejectionReason,
   });
 
-  // A rejected proforma that gets edited goes back to pending review;
-  // a draft can be submitted explicitly.
-  if (proforma.status === 'rejected') {
-    proforma.status = 'pending';
-    proforma.rejectionReason = '';
-  }
-  if (proforma.status === 'draft' && data.submit) {
-    proforma.status = 'pending';
-  }
-
-  await proforma.save();
-  await ApprovalHistory.create({
-    proforma: proforma._id,
-    action: proforma.status === 'pending' && data.submit ? 'submitted' : 'updated',
-    actor: user.id,
+  await approvalHistoryModel.create({
+    proformaId: proforma.id,
+    action: status === 'pending' && data.submit ? 'submitted' : 'updated',
+    actorId: user.id,
   });
 
-  return proforma.populate(['customer', 'salesPerson']);
+  return updated;
 }
 
 async function submitProforma(proforma, user) {
-  if (user.role === 'sales' && String(proforma.salesPerson) !== String(user.id)) {
+  if (user.role === 'sales' && proforma.salesPerson.id !== user.id) {
     throw new ApiError(403, 'You can only submit your own proformas');
   }
   if (proforma.status !== 'draft') {
     throw new ApiError(400, 'Only draft proformas can be submitted');
   }
-  proforma.status = 'pending';
-  await proforma.save();
-  await ApprovalHistory.create({ proforma: proforma._id, action: 'submitted', actor: user.id });
-  return proforma;
+  const updated = await proformaModel.updateStatus(proforma.id, { status: 'pending' });
+  await approvalHistoryModel.create({
+    proformaId: proforma.id, action: 'submitted', actorId: user.id,
+  });
+  return updated;
 }
 
 async function supervisorApprove(proforma, user, comment) {
   if (proforma.status !== 'pending') {
     throw new ApiError(400, `Cannot approve a proforma in "${proforma.status}" status`);
   }
-  proforma.status = 'supervisor_approved';
-  proforma.supervisorApprovedBy = user.id;
-  proforma.supervisorApprovedAt = new Date();
-  await proforma.save();
-
-  await ApprovalHistory.create({
-    proforma: proforma._id,
-    action: 'supervisor_approved',
-    actor: user.id,
-    comment: comment || '',
+  const updated = await proformaModel.updateStatus(proforma.id, {
+    status: 'supervisor_approved',
+    supervisorApprovedBy: user.id,
   });
-  await notificationService.notify(proforma.salesPerson, {
+
+  await approvalHistoryModel.create({
+    proformaId: proforma.id, action: 'supervisor_approved', actorId: user.id, comment: comment || '',
+  });
+  await notificationService.notify(proforma.salesPerson.id, {
     type: 'proforma_supervisor_approved',
     message: `Proforma ${proforma.proformaNumber} was approved by supervisor`,
-    proforma: proforma._id,
+    proformaId: proforma.id,
   });
-  return proforma;
+  return updated;
 }
 
 async function adminApprove(proforma, user, comment) {
@@ -202,23 +205,20 @@ async function adminApprove(proforma, user, comment) {
   if (!['pending', 'supervisor_approved'].includes(proforma.status)) {
     throw new ApiError(400, `Cannot approve a proforma in "${proforma.status}" status`);
   }
-  proforma.status = 'approved';
-  proforma.adminApprovedBy = user.id;
-  proforma.adminApprovedAt = new Date();
-  await proforma.save();
-
-  await ApprovalHistory.create({
-    proforma: proforma._id,
-    action: 'admin_approved',
-    actor: user.id,
-    comment: comment || '',
+  const updated = await proformaModel.updateStatus(proforma.id, {
+    status: 'approved',
+    adminApprovedBy: user.id,
   });
-  await notificationService.notify(proforma.salesPerson, {
+
+  await approvalHistoryModel.create({
+    proformaId: proforma.id, action: 'admin_approved', actorId: user.id, comment: comment || '',
+  });
+  await notificationService.notify(proforma.salesPerson.id, {
     type: 'proforma_admin_approved',
     message: `Proforma ${proforma.proformaNumber} received final approval`,
-    proforma: proforma._id,
+    proformaId: proforma.id,
   });
-  return proforma;
+  return updated;
 }
 
 async function reject(proforma, user, reason) {
@@ -229,26 +229,23 @@ async function reject(proforma, user, reason) {
   if (!rejectable.includes(proforma.status)) {
     throw new ApiError(400, `Cannot reject a proforma in "${proforma.status}" status`);
   }
-  proforma.status = 'rejected';
-  proforma.rejectionReason = reason;
-  proforma.supervisorApprovedBy = null;
-  proforma.supervisorApprovedAt = null;
-  proforma.adminApprovedBy = null;
-  proforma.adminApprovedAt = null;
-  await proforma.save();
 
-  await ApprovalHistory.create({
-    proforma: proforma._id,
-    action: 'rejected',
-    actor: user.id,
-    comment: reason,
+  const updated = await proformaModel.updateStatus(proforma.id, {
+    status: 'rejected',
+    rejectionReason: reason,
+    supervisorApprovedBy: null,
+    adminApprovedBy: null,
   });
-  await notificationService.notify(proforma.salesPerson, {
+
+  await approvalHistoryModel.create({
+    proformaId: proforma.id, action: 'rejected', actorId: user.id, comment: reason,
+  });
+  await notificationService.notify(proforma.salesPerson.id, {
     type: 'proforma_rejected',
     message: `Proforma ${proforma.proformaNumber} was rejected: ${reason}`,
-    proforma: proforma._id,
+    proformaId: proforma.id,
   });
-  return proforma;
+  return updated;
 }
 
 module.exports = {

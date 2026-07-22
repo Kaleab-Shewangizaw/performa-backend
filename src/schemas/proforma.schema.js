@@ -1,10 +1,11 @@
 const { z } = require('zod');
 const { thicknessEnum } = require('./product.schema');
 
-const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
+// Postgres SERIAL ids arrive as numbers, but query/body values may be strings.
+const id = z.coerce.number().int().positive();
 
 const itemSchema = z.object({
-  productId: objectId,
+  productId: id,
   width: z.number().positive().max(100),
   height: z.number().positive().max(100),
   thickness: thicknessEnum,
@@ -13,7 +14,7 @@ const itemSchema = z.object({
 });
 
 const proformaSchema = z.object({
-  customerId: objectId,
+  customerId: id,
   issueDate: z.string().date().optional(),
   expiryDate: z.string().date().optional(),
   items: z.array(itemSchema).min(1),

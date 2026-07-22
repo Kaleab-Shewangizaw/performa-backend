@@ -1,39 +1,57 @@
-const mongoose = require('mongoose');
+const { query } = require('../config/db');
+const { mapRow } = require('../utils/rowMapper');
 
-// Single-document collection holding company/system settings.
-const settingSchema = new mongoose.Schema(
-  {
-    key: { type: String, default: 'global', unique: true },
-    companyName: { type: String, default: 'Granite Factory PLC', maxlength: 200 },
-    companyAddress: { type: String, default: '', maxlength: 500 },
-    companyPhone: { type: String, default: '', maxlength: 50 },
-    companyEmail: { type: String, default: '', maxlength: 200 },
-    companyWebsite: { type: String, default: '', maxlength: 200 },
-    logoUrl: { type: String, default: '', maxlength: 100000 },
-    currency: { type: String, default: 'ETB', maxlength: 10 },
-    defaultVatRate: { type: Number, default: 15, min: 0, max: 100 },
-    defaultPaymentTerms: { type: String, default: '50% advance, 50% on delivery', maxlength: 500 },
-    defaultValidityDays: { type: Number, default: 30, min: 1 },
-    proformaPrefix: { type: String, default: 'PF', maxlength: 10 },
-  },
-  {
-    timestamps: true,
-    toJSON: {
-      virtuals: true,
-      transform(doc, ret) {
-        ret.id = ret._id.toString();
-        delete ret._id;
-        delete ret.__v;
-        return ret;
-      },
-    },
-  }
-);
+const COLUMNS = `key, company_name, company_address, company_phone, company_email,
+                 company_website, logo_url, currency, default_vat_rate,
+                 default_payment_terms, default_validity_days, proforma_prefix,
+                 created_at, updated_at`;
 
-settingSchema.statics.get = async function get() {
-  let doc = await this.findOne({ key: 'global' });
-  if (!doc) doc = await this.create({ key: 'global' });
-  return doc;
+const FIELD_TO_COLUMN = {
+  companyName: 'company_name',
+  companyAddress: 'company_address',
+  companyPhone: 'company_phone',
+  companyEmail: 'company_email',
+  companyWebsite: 'company_website',
+  logoUrl: 'logo_url',
+  currency: 'currency',
+  defaultVatRate: 'default_vat_rate',
+  defaultPaymentTerms: 'default_payment_terms',
+  defaultValidityDays: 'default_validity_days',
+  proformaPrefix: 'proforma_prefix',
 };
 
-module.exports = mongoose.model('Setting', settingSchema);
+// Returns the single settings row, creating it with defaults on first access.
+async function get() {
+  const { rows } = await query(`SELECT ${COLUMNS} FROM settings WHERE key = 'global'`);
+  if (rows[0]) return mapRow(rows[0]);
+
+  const { rows: created } = await query(
+    `INSERT INTO settings (key) VALUES ('global')
+     ON CONFLICT (key) DO UPDATE SET key = 'global'
+     RETURNING ${COLUMNS}`
+  );
+  return mapRow(created[0]);
+}
+
+async function update(data) {
+  await get(); // ensure the row exists
+
+  const sets = [];
+  const params = [];
+  for (const [field, column] of Object.entries(FIELD_TO_COLUMN)) {
+    if (data[field] !== undefined) {
+      params.push(data[field]);
+      sets.push(`${column} = $${params.length}`);
+    }
+  }
+  if (!sets.length) return get();
+
+  const { rows } = await query(
+    `UPDATE settings SET ${sets.join(', ')}, updated_at = now()
+     WHERE key = 'global' RETURNING ${COLUMNS}`,
+    params
+  );
+  return mapRow(rows[0]);
+}
+
+module.exports = { get, update };
