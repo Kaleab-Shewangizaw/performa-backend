@@ -20,6 +20,8 @@ const productSchema = z.object({
   thicknessOptions: z.array(thicknessEnum).min(1),
   defaultUnitPrice: z.number().nonnegative(),
   status: z.enum(PRODUCT_STATUSES).default('active'),
+  // Pre-cleared products let a proforma skip the approval chain.
+  allowsDirectApproval: z.boolean().optional().default(false),
 });
 
 module.exports = { productSchema, thicknessEnum };

@@ -7,6 +7,9 @@ const { settingSchema } = require('../schemas/setting.schema');
 
 const router = Router();
 
+// Company name and logo for the login screen — no session yet at that point.
+router.get('/public', controller.publicBranding);
+
 router.use(requireAuth);
 
 // Everyone can read company settings (needed to render proformas);

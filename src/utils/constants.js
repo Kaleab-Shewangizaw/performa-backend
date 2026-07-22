@@ -53,6 +53,7 @@ const APPROVAL_ACTIONS = [
   'admin_approved',
   'rejected',
   'reverted_to_draft',
+  'auto_approved',
 ];
 
 const NOTIFICATION_TYPES = [
@@ -60,12 +61,21 @@ const NOTIFICATION_TYPES = [
   'proforma_supervisor_approved',
   'proforma_admin_approved',
   'proforma_rejected',
+  'proforma_auto_approved',
 ];
+
+// Roles allowed to edit a proforma, and the statuses they may edit it in.
+// Admin is unrestricted and handled separately.
+const EDIT_RULES = {
+  sales: ['draft', 'pending', 'rejected'],
+  supervisor: ['draft', 'pending', 'supervisor_approved', 'rejected'],
+};
 
 module.exports = {
   ROLES,
   PROFORMA_STATUSES,
   EDITABLE_STATUSES,
+  EDIT_RULES,
   STONE_CATEGORIES,
   FINISHES,
   THICKNESS_OPTIONS,

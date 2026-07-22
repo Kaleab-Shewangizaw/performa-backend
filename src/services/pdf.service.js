@@ -32,6 +32,12 @@ function num(n, digits = 2) {
   return Number(n).toFixed(digits);
 }
 
+// Measurements print at their natural precision (0.868, not 0.87), up to 3dp.
+function measure(n) {
+  if (n === null || n === undefined || n === '') return '';
+  return Number(Number(n).toFixed(3)).toString();
+}
+
 function fmtDate(d) {
   if (!d) return '-';
   return new Date(d).toLocaleDateString('en-GB', {
@@ -68,23 +74,25 @@ async function renderProformaPdf(proforma, settings, res) {
   const currency = settings.currency || 'ETB';
 
   // ---------- Header ----------
-  const hasLogo = tryEmbedLogo(doc, settings.logoUrl, left, 26, 110, 54);
-  const titleX = hasLogo ? left + 122 : left;
+  const hasLogo = tryEmbedLogo(doc, settings.logoUrl, left, 26, 96, 48);
+  const titleX = hasLogo ? left + 108 : left;
+  const titleBlockW = 170;
+  const nameW = right - titleBlockW - titleX - 12;
 
-  doc.fillColor(COLORS.brand).font('Helvetica-Bold').fontSize(15)
-    .text(settings.companyName || '', titleX, 30, { width: right - titleX - 130 });
-  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8);
+  doc.fillColor(COLORS.brand).font('Helvetica-Bold').fontSize(13)
+    .text(settings.companyName || '', titleX, 30, { width: nameW });
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(7.5);
   const contact = [settings.companyPhone, settings.companyAddress, settings.companyEmail]
     .filter(Boolean).join('   ');
-  doc.text(contact, titleX, 50, { width: right - titleX - 130 });
+  doc.text(contact, titleX, doc.y + 2, { width: nameW });
 
-  doc.fillColor(COLORS.accent).font('Helvetica-Bold').fontSize(16)
-    .text('PROFORMA INVOICE', right - 190, 30, { width: 190, align: 'right' });
+  doc.fillColor(COLORS.accent).font('Helvetica-Bold').fontSize(14)
+    .text('PROFORMA INVOICE', right - titleBlockW, 30, { width: titleBlockW, align: 'right' });
   doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(10)
-    .text(proforma.proformaNumber, right - 190, 50, { width: 190, align: 'right' });
+    .text(proforma.proformaNumber, right - titleBlockW, 48, { width: titleBlockW, align: 'right' });
   doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8)
-    .text(STATUS_LABELS[proforma.status] || proforma.status, right - 190, 63, {
-      width: 190, align: 'right',
+    .text(STATUS_LABELS[proforma.status] || proforma.status, right - titleBlockW, 61, {
+      width: titleBlockW, align: 'right',
     });
 
   let y = 88;
@@ -158,13 +166,13 @@ async function renderProformaPdf(proforma, settings, res) {
     const isLinear = item.itemType === 'linear';
     return {
       description: item.description || item.productName || '',
-      length: num(item.length),
-      width: isLinear ? '—' : num(item.width),
+      length: measure(item.length),
+      width: isLinear ? '—' : measure(item.width),
       // Stone is quoted in centimetres; thickness is stored in millimetres.
-      thickness: isLinear || item.thickness == null ? '—' : num(item.thickness / 10, 1),
-      totalLength: num(item.totalLength),
+      thickness: isLinear || item.thickness == null ? '—' : measure(item.thickness / 10),
+      totalLength: measure(item.totalLength),
       quantity: isLinear ? '—' : String(item.quantity),
-      area: isLinear ? '—' : num(item.area),
+      area: isLinear ? '—' : measure(item.area),
       unitPrice: money(item.unitPrice),
       lineTotal: money(item.lineTotal),
       remark: item.remark || (isLinear ? 'per linear m' : ''),
@@ -173,7 +181,7 @@ async function renderProformaPdf(proforma, settings, res) {
 
   proforma.items.forEach((item, idx) => {
     const values = rowValues(item);
-    const subLabel = [item.productName, item.stoneColor].filter(Boolean).join(' · ');
+    const subLabel = [item.productName, item.finish].filter(Boolean).join(' · ');
     const h = subLabel ? 24 : 17;
 
     if (y + h > doc.page.height - 150) {
@@ -221,20 +229,30 @@ async function renderProformaPdf(proforma, settings, res) {
   totalRow('Total amount inclusive of VAT', proforma.grandTotal, { bold: true, fill: COLORS.band });
 
   // ---------- Terms, remarks, products, signatures ----------
+  // The signature strip sits at a fixed offset from the bottom, so make sure
+  // the terms block has room above it rather than letting it spill to a new page.
+  const SIGNATURE_BLOCK_H = 104;
+  const TERMS_BLOCK_H = 140;
+  if (y > doc.page.height - (SIGNATURE_BLOCK_H + TERMS_BLOCK_H)) {
+    doc.addPage();
+    y = 40;
+  }
+
   const blockY = y + 8;
-  const colWidth = (contentWidth - 100) / 2;
+  const colWidth = (contentWidth - 40) / 2;
+  const rightColX = left + colWidth + 40;
 
   const bullets = (text) =>
     String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
 
   doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
     .text('Terms and Conditions', left, blockY);
-  doc.font('Helvetica').fontSize(7.8).fillColor(COLORS.ink);
   const terms = bullets(settings.termsAndConditions);
   if (proforma.paymentTerms && !terms.length) terms.push(proforma.paymentTerms);
-  doc.text(terms.map((t) => `•  ${t}`).join('\n'), left, blockY + 13, {
-    width: colWidth, lineGap: 2.5,
-  });
+  doc.font('Helvetica').fontSize(7.8).fillColor(COLORS.ink)
+    .text(terms.map((t) => `•  ${t}`).join('\n'), left, blockY + 13, {
+      width: colWidth, lineGap: 2.5,
+    });
 
   let rightColY = blockY;
   const remarkLines = [
@@ -246,38 +264,39 @@ async function renderProformaPdf(proforma, settings, res) {
 
   if (remarkLines.length) {
     doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
-      .text('Remark', left + colWidth + 30, rightColY);
+      .text('Remark', rightColX, rightColY);
     doc.font('Helvetica').fontSize(7.8).fillColor(COLORS.ink)
-      .text(remarkLines.join('\n'), left + colWidth + 30, rightColY + 13, {
-        width: colWidth - 60, lineGap: 2.5,
+      .text(remarkLines.join('\n'), rightColX, rightColY + 13, {
+        width: colWidth - 80, lineGap: 2.5,
       });
     rightColY = doc.y + 6;
   }
 
   if (settings.productsOffered) {
     doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
-      .text('Our products', left + colWidth + 30, rightColY);
-    doc.font('Helvetica').fontSize(7.4).fillColor(COLORS.muted)
-      .text(bullets(settings.productsOffered).join('\n'), left + colWidth + 30, rightColY + 13, {
-        width: colWidth - 60, lineGap: 1.5,
+      .text('Our products', rightColX, rightColY);
+    doc.font('Helvetica').fontSize(7.2).fillColor(COLORS.muted)
+      .text(bullets(settings.productsOffered).join('\n'), rightColX, rightColY + 12, {
+        width: colWidth - 80, lineGap: 1.2,
       });
   }
 
-  // QR + signatures pinned near the bottom of the last page.
-  const footY = Math.max(doc.y + 18, doc.page.height - 118);
-  doc.image(qrPng, right - 68, footY - 6, { fit: [62, 62] });
+  // QR + signatures, pinned to the bottom of whatever page we ended on.
+  const qrY = doc.page.height - 112;
+  doc.image(qrPng, right - 62, qrY, { fit: [56, 56] });
   doc.font('Helvetica').fontSize(6).fillColor(COLORS.muted)
-    .text('Scan to verify', right - 68, footY + 58, { width: 62, align: 'center' });
+    .text('Scan to verify', right - 62, qrY + 58, { width: 56, align: 'center' });
 
-  const sigY = footY + 34;
+  const sigY = doc.page.height - 58;
   doc.moveTo(left, sigY).lineTo(left + 150, sigY).lineWidth(0.6).stroke(COLORS.ink);
   doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.muted)
-    .text(`Prepared by: ${proforma.salesPerson?.name || ''}`, left, sigY + 4);
+    .text(`Prepared by: ${proforma.salesPerson?.name || ''}`, left, sigY + 4, { width: 150 });
   doc.moveTo(left + 190, sigY).lineTo(left + 340, sigY).stroke(COLORS.ink);
-  doc.text('Approved by', left + 190, sigY + 4);
+  doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.muted)
+    .text('Approved by', left + 190, sigY + 4, { width: 150 });
   if (proforma.status === 'approved') {
     doc.font('Helvetica-Bold').fontSize(9).fillColor('#15803d')
-      .text('APPROVED', left + 190, sigY - 13);
+      .text('APPROVED', left + 190, sigY - 13, { width: 150 });
   }
 
   // ---------- Footer on every page ----------
