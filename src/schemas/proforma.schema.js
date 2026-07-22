@@ -1,20 +1,41 @@
 const { z } = require('zod');
 const { thicknessEnum } = require('./product.schema');
+const { ITEM_TYPES } = require('../utils/constants');
 
 // Postgres SERIAL ids arrive as numbers, but query/body values may be strings.
 const id = z.coerce.number().int().positive();
 
-const itemSchema = z.object({
-  productId: id,
-  width: z.number().positive().max(100),
-  height: z.number().positive().max(100),
-  thickness: thicknessEnum,
-  quantity: z.number().int().positive().max(100000),
-  unitPrice: z.number().nonnegative().optional(),
-});
+// An item is either cut stone priced per m2, or edge work priced per linear metre.
+const itemSchema = z
+  .object({
+    itemType: z.enum(ITEM_TYPES).default('area'),
+    description: z.string().min(1, 'Description is required').max(200),
+    productId: id.optional().nullable(),
+    length: z.number().positive().max(10000),
+    width: z.number().positive().max(100).optional().nullable(),
+    thickness: thicknessEnum.optional().nullable(),
+    quantity: z.number().int().positive().max(100000).default(1),
+    unitPrice: z.number().nonnegative(),
+    remark: z.string().max(300).optional().default(''),
+  })
+  .superRefine((item, ctx) => {
+    if (item.itemType === 'area') {
+      if (item.width == null) {
+        ctx.addIssue({ code: 'custom', path: ['width'], message: 'Width is required for area items' });
+      }
+      if (item.thickness == null) {
+        ctx.addIssue({ code: 'custom', path: ['thickness'], message: 'Thickness is required for area items' });
+      }
+    }
+  });
 
 const proformaSchema = z.object({
   customerId: id,
+  orderNumber: z.string().max(50).optional().default(''),
+  materialType: z.string().max(200).optional().default(''),
+  orderedBy: z.string().max(200).optional().default(''),
+  orderedDate: z.string().date().optional().nullable(),
+  projectName: z.string().max(200).optional().default(''),
   issueDate: z.string().date().optional(),
   expiryDate: z.string().date().optional(),
   items: z.array(itemSchema).min(1),
@@ -23,6 +44,8 @@ const proformaSchema = z.object({
   paymentTerms: z.string().max(500).optional(),
   deliveryTime: z.string().max(300).optional(),
   validityPeriod: z.string().max(300).optional(),
+  totalWeight: z.string().max(100).optional().default(''),
+  remark: z.string().max(1000).optional().default(''),
   notes: z.string().max(2000).optional(),
   asDraft: z.boolean().optional().default(false),
   submit: z.boolean().optional().default(false),

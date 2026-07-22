@@ -4,6 +4,7 @@ const { mapRow } = require('../utils/rowMapper');
 const COLUMNS = `key, company_name, company_address, company_phone, company_email,
                  company_website, logo_url, currency, default_vat_rate,
                  default_payment_terms, default_validity_days, proforma_prefix,
+                 terms_and_conditions, products_offered, bank_details,
                  created_at, updated_at`;
 
 const FIELD_TO_COLUMN = {
@@ -18,6 +19,9 @@ const FIELD_TO_COLUMN = {
   defaultPaymentTerms: 'default_payment_terms',
   defaultValidityDays: 'default_validity_days',
   proformaPrefix: 'proforma_prefix',
+  termsAndConditions: 'terms_and_conditions',
+  productsOffered: 'products_offered',
+  bankDetails: 'bank_details',
 };
 
 // Returns the single settings row, creating it with defaults on first access.

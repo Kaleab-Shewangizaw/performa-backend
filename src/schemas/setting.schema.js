@@ -6,12 +6,15 @@ const settingSchema = z.object({
   companyPhone: z.string().max(50).optional(),
   companyEmail: z.string().email().optional().or(z.literal('')),
   companyWebsite: z.string().max(200).optional(),
-  logoUrl: z.string().max(100000).optional(),
+  logoUrl: z.string().max(200000).optional(),
   currency: z.string().min(1).max(10).optional(),
   defaultVatRate: z.number().min(0).max(100).optional(),
   defaultPaymentTerms: z.string().max(500).optional(),
   defaultValidityDays: z.number().int().min(1).max(365).optional(),
   proformaPrefix: z.string().min(1).max(10).optional(),
+  termsAndConditions: z.string().max(4000).optional(),
+  productsOffered: z.string().max(4000).optional(),
+  bankDetails: z.string().max(2000).optional(),
 });
 
 module.exports = { settingSchema };

@@ -1,8 +1,9 @@
 const { query, withTransaction } = require('../config/db');
 const { mapRow, mapRows } = require('../utils/rowMapper');
 
-const ITEM_COLUMNS = `id, product_id, product_name, stone_category, stone_color, finish,
-                      width, height, area, thickness, quantity, unit_price, line_total`;
+const ITEM_COLUMNS = `id, item_type, description, product_id, product_name, stone_category,
+                      stone_color, finish, length, width, area, total_length, thickness,
+                      quantity, unit_price, line_total, remark`;
 
 // Reads join customer/sales-person/approver rows and nest them, matching the
 // shape the API has always returned (customer: {...}, salesPerson: {...}).
@@ -35,13 +36,15 @@ async function insertItems(client, proformaId, items) {
   for (const item of items) {
     await client.query(
       `INSERT INTO proforma_items
-         (proforma_id, product_id, product_name, stone_category, stone_color, finish,
-          width, height, area, thickness, quantity, unit_price, line_total, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+         (proforma_id, item_type, description, product_id, product_name, stone_category,
+          stone_color, finish, length, width, area, total_length, thickness, quantity,
+          unit_price, line_total, remark, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
       [
-        proformaId, item.productId, item.productName, item.stoneCategory, item.stoneColor,
-        item.finish, item.width, item.height, item.area, item.thickness, item.quantity,
-        item.unitPrice, item.lineTotal, order++,
+        proformaId, item.itemType, item.description, item.productId, item.productName,
+        item.stoneCategory, item.stoneColor, item.finish, item.length, item.width,
+        item.area, item.totalLength, item.thickness, item.quantity, item.unitPrice,
+        item.lineTotal, item.remark, order++,
       ]
     );
   }
@@ -53,13 +56,17 @@ async function create(data) {
       `INSERT INTO proformas
          (proforma_number, customer_id, sales_person_id, issue_date, expiry_date,
           subtotal, discount, vat_rate, vat_amount, grand_total,
-          payment_terms, delivery_time, validity_period, notes, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          payment_terms, delivery_time, validity_period, notes, status,
+          order_number, material_type, ordered_by, ordered_date, project_name,
+          total_weight, remark)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING id`,
       [
         data.proformaNumber, data.customerId, data.salesPersonId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes, data.status,
+        data.orderNumber, data.materialType, data.orderedBy, data.orderedDate, data.projectName,
+        data.totalWeight, data.remark,
       ]
     );
     const proformaId = rows[0].id;
@@ -155,13 +162,17 @@ async function replaceItemsAndTotals(id, data) {
          customer_id = $2, issue_date = $3, expiry_date = $4,
          subtotal = $5, discount = $6, vat_rate = $7, vat_amount = $8, grand_total = $9,
          payment_terms = $10, delivery_time = $11, validity_period = $12, notes = $13,
-         status = $14, rejection_reason = $15, updated_at = now()
+         status = $14, rejection_reason = $15,
+         order_number = $16, material_type = $17, ordered_by = $18, ordered_date = $19,
+         project_name = $20, total_weight = $21, remark = $22, updated_at = now()
        WHERE id = $1`,
       [
         id, data.customerId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes,
         data.status, data.rejectionReason,
+        data.orderNumber, data.materialType, data.orderedBy, data.orderedDate,
+        data.projectName, data.totalWeight, data.remark,
       ]
     );
     await client.query('DELETE FROM proforma_items WHERE proforma_id = $1', [id]);

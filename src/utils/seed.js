@@ -1,11 +1,37 @@
-// Seeds demo users, products, and customers. Idempotent: skips records that
-// already exist. Run with: npm run seed
+// Seeds company settings, demo users, products, and customers.
+// Idempotent: existing records are skipped, settings are only filled in once.
+// Run with: npm run seed
+const fs = require('fs');
+const path = require('path');
 const { pool, query } = require('../config/db');
 const userModel = require('../models/user.model');
 const productModel = require('../models/product.model');
 const customerModel = require('../models/customer.model');
 const settingModel = require('../models/setting.model');
 const { hashPassword } = require('./password');
+
+const COMPANY = {
+  companyName: 'SHRUBS MARBLE AND GRANITE PLC',
+  companyPhone: '0935402376 / 0935402315 / Office 0116670153',
+  companyAddress: 'Addis Ababa, Ethiopia',
+  currency: 'ETB',
+  defaultVatRate: 15,
+  defaultPaymentTerms: '50% advance payment',
+  defaultValidityDays: 15,
+  proformaPrefix: 'SMG',
+  termsAndConditions: [
+    '50% advance payment',
+    "This Proforma is valid for 15 day's from the date of issue.",
+    'All measurements are calculated strictly in square meters (SQM).',
+  ].join('\n'),
+  productsOffered: [
+    'Granite',
+    'Marble',
+    'Limestone',
+    'for Tread and Riser, Door sill, Window sill, Copping,',
+    'Skirting, Flamed Landing, Kitchen Top, Polished Landing',
+  ].join('\n'),
+};
 
 const USERS = [
   { name: 'Admin User', email: 'admin@granite.com', password: 'admin1234', role: 'admin' },
@@ -14,7 +40,8 @@ const USERS = [
 ];
 
 const PRODUCTS = [
-  { name: 'Absolute Black', stoneCategory: 'Granite', stoneColor: 'Black', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 4500, status: 'active' },
+  { name: 'Harer Granite', stoneCategory: 'Granite', stoneColor: 'Harer', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 7000, status: 'active' },
+  { name: 'Absolute Black', stoneCategory: 'Granite', stoneColor: 'Black', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 6800, status: 'active' },
   { name: 'Kashmir White', stoneCategory: 'Granite', stoneColor: 'White/Grey', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 5200, status: 'active' },
   { name: 'Tan Brown', stoneCategory: 'Granite', stoneColor: 'Brown', finish: 'Flamed', thicknessOptions: [20, 30], defaultUnitPrice: 3900, status: 'active' },
   { name: 'Carrara Bianco', stoneCategory: 'Marble', stoneColor: 'White', finish: 'Honed', thicknessOptions: [15, 20, 30], defaultUnitPrice: 6800, status: 'active' },
@@ -23,6 +50,7 @@ const PRODUCTS = [
   { name: 'Grey Mist Quartz', stoneCategory: 'Quartz', stoneColor: 'Grey', finish: 'Leathered', thicknessOptions: [12, 20], defaultUnitPrice: 7800, status: 'active' },
   { name: 'Taj Mahal', stoneCategory: 'Quartzite', stoneColor: 'Cream', finish: 'Leathered', thicknessOptions: [20, 30], defaultUnitPrice: 9200, status: 'active' },
   { name: 'Silver Travertine', stoneCategory: 'Travertine', stoneColor: 'Silver/Grey', finish: 'Brushed', thicknessOptions: [10, 12, 15], defaultUnitPrice: 3200, status: 'active' },
+  { name: 'Beige Limestone', stoneCategory: 'Limestone', stoneColor: 'Beige', finish: 'Honed', thicknessOptions: [15, 20, 30], defaultUnitPrice: 4100, status: 'active' },
 ];
 
 const CUSTOMERS = [
@@ -30,10 +58,22 @@ const CUSTOMERS = [
   { fullName: 'Hanna Tesfaye', companyName: 'Hanna Interiors', phone: '+251922334455', email: 'hanna@interiors.et', address: 'Kazanchis', city: 'Addis Ababa', taxNumber: '', notes: '' },
 ];
 
+function readLogoDataUrl() {
+  const file = path.join(__dirname, '..', 'assets', 'company-logo.png');
+  if (!fs.existsSync(file)) return '';
+  return `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
+}
+
 async function seed() {
   console.log('Seeding...');
 
-  await settingModel.get();
+  // Only populate company settings while they are still at their defaults, so
+  // re-seeding never overwrites what an admin has customised.
+  const current = await settingModel.get();
+  if (current.companyName === 'Granite Factory PLC' || !current.logoUrl) {
+    await settingModel.update({ ...COMPANY, logoUrl: readLogoDataUrl() });
+    console.log(`  settings: ${COMPANY.companyName} (logo embedded)`);
+  }
 
   for (const u of USERS) {
     if (await userModel.existsByEmail(u.email)) continue;

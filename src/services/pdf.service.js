@@ -1,12 +1,15 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
 
+// Brand colours taken from the company logo (orange / deep blue).
 const COLORS = {
   ink: '#111827',
   muted: '#6b7280',
-  line: '#e5e7eb',
-  accent: '#1e3a5f',
-  accentLight: '#f1f5f9',
+  line: '#d1d5db',
+  brand: '#12467e',
+  accent: '#f59021',
+  band: '#eef2f7',
+  zebra: '#f8fafc',
 };
 
 const STATUS_LABELS = {
@@ -17,233 +20,281 @@ const STATUS_LABELS = {
   approved: 'APPROVED',
 };
 
-function money(n, currency) {
-  return `${Number(n).toLocaleString('en-US', {
+function money(n) {
+  return Number(n || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })} ${currency}`;
-}
-
-function fmtDate(d) {
-  return new Date(d).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
   });
 }
 
-function tryEmbedLogo(doc, logoUrl, x, y, size) {
+function num(n, digits = 2) {
+  if (n === null || n === undefined || n === '') return '';
+  return Number(n).toFixed(digits);
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+}
+
+function tryEmbedLogo(doc, logoUrl, x, y, w, h) {
   if (!logoUrl || !logoUrl.startsWith('data:image')) return false;
   try {
     const base64 = logoUrl.split(',')[1];
-    doc.image(Buffer.from(base64, 'base64'), x, y, { fit: [size, size] });
+    doc.image(Buffer.from(base64, 'base64'), x, y, { fit: [w, h], align: 'left' });
     return true;
   } catch {
     return false;
   }
 }
 
-// Renders the proforma as a PDF stream piped to `res`.
-// `proforma` must be populated with customer + salesPerson.
+// Renders the proforma as a PDF stream piped to `res`, following the layout
+// of the company's own spreadsheet: order header, element table with
+// Size / Thickness / Total length / Total area, then totals, terms and remarks.
 async function renderProformaPdf(proforma, settings, res) {
   const qrPng = await QRCode.toBuffer(
-    JSON.stringify({ id: proforma.id, number: proformaNumberOf(proforma) }),
+    JSON.stringify({ id: proforma.id, number: proforma.proformaNumber }),
     { width: 220, margin: 1 }
   );
 
-  const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+  const doc = new PDFDocument({ size: 'A4', margin: 32, bufferPages: true });
   doc.pipe(res);
 
-  const pageWidth = doc.page.width;
-  const left = 40;
-  const right = pageWidth - 40;
+  const left = 32;
+  const right = doc.page.width - 32;
   const contentWidth = right - left;
+  const currency = settings.currency || 'ETB';
 
-  // ---- Header band ----
-  doc.rect(0, 0, pageWidth, 110).fill(COLORS.accent);
+  // ---------- Header ----------
+  const hasLogo = tryEmbedLogo(doc, settings.logoUrl, left, 26, 110, 54);
+  const titleX = hasLogo ? left + 122 : left;
 
-  const hasLogo = tryEmbedLogo(doc, settings.logoUrl, left, 25, 60);
-  const headerTextX = hasLogo ? left + 75 : left;
+  doc.fillColor(COLORS.brand).font('Helvetica-Bold').fontSize(15)
+    .text(settings.companyName || '', titleX, 30, { width: right - titleX - 130 });
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8);
+  const contact = [settings.companyPhone, settings.companyAddress, settings.companyEmail]
+    .filter(Boolean).join('   ');
+  doc.text(contact, titleX, 50, { width: right - titleX - 130 });
 
-  doc.fill('#ffffff').font('Helvetica-Bold').fontSize(20)
-    .text(settings.companyName || 'Granite Factory', headerTextX, 30);
-  doc.font('Helvetica').fontSize(9).fillColor('#cbd5e1');
-  const contactBits = [settings.companyAddress, settings.companyPhone, settings.companyEmail]
-    .filter(Boolean)
-    .join('  |  ');
-  doc.text(contactBits, headerTextX, 58, { width: contentWidth - 200 });
+  doc.fillColor(COLORS.accent).font('Helvetica-Bold').fontSize(16)
+    .text('PROFORMA INVOICE', right - 190, 30, { width: 190, align: 'right' });
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(10)
+    .text(proforma.proformaNumber, right - 190, 50, { width: 190, align: 'right' });
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8)
+    .text(STATUS_LABELS[proforma.status] || proforma.status, right - 190, 63, {
+      width: 190, align: 'right',
+    });
 
-  doc.font('Helvetica-Bold').fontSize(22).fillColor('#ffffff')
-    .text('PROFORMA INVOICE', left, 30, { width: contentWidth, align: 'right' });
-  doc.font('Helvetica').fontSize(11).fillColor('#cbd5e1')
-    .text(proformaNumberOf(proforma), left, 58, { width: contentWidth, align: 'right' });
+  let y = 88;
+  doc.moveTo(left, y).lineTo(right, y).lineWidth(1.5).stroke(COLORS.accent);
+  y += 10;
 
-  // ---- Meta row ----
-  let y = 130;
-  const metaCols = [
-    ['Issue Date', fmtDate(proforma.issueDate)],
-    ['Expiry Date', fmtDate(proforma.expiryDate)],
-    ['Sales Person', proforma.salesPerson?.name || '-'],
-    ['Status', STATUS_LABELS[proforma.status] || proforma.status],
-  ];
-  const metaW = contentWidth / metaCols.length;
-  metaCols.forEach(([label, value], i) => {
-    doc.font('Helvetica').fontSize(8).fillColor(COLORS.muted)
-      .text(label.toUpperCase(), left + i * metaW, y);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor(COLORS.ink)
-      .text(value, left + i * metaW, y + 12, { width: metaW - 10 });
-  });
-
-  // ---- Customer block ----
-  y += 45;
+  // ---------- Order details ----------
   const c = proforma.customer || {};
-  doc.rect(left, y, contentWidth, 78).fill(COLORS.accentLight);
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.muted).text('BILL TO', left + 14, y + 10);
-  doc.font('Helvetica-Bold').fontSize(12).fillColor(COLORS.ink)
-    .text(c.fullName || '-', left + 14, y + 22);
-  doc.font('Helvetica').fontSize(9).fillColor(COLORS.ink);
-  const custLines = [
-    c.companyName,
-    [c.phone, c.email].filter(Boolean).join('  |  '),
-    [c.address, c.city].filter(Boolean).join(', '),
-  ].filter(Boolean);
-  doc.text(custLines.join('\n'), left + 14, y + 38, { width: contentWidth - 28 });
+  const detailRows = [
+    ['Order no', proforma.orderNumber || proforma.proformaNumber],
+    ['Material Type', proforma.materialType],
+    ['Material Ordered by', proforma.orderedBy || c.fullName],
+    ['Material Ordered date', fmtDate(proforma.orderedDate || proforma.issueDate)],
+    ['Project name', proforma.projectName],
+    ['Material Delivery date', proforma.deliveryTime],
+    ['Phone No.', c.phone],
+    ['Customer', [c.fullName, c.companyName].filter(Boolean).join(' — ')],
+  ].filter(([, v]) => v);
 
-  // ---- Items table ----
-  y += 96;
+  const colW = contentWidth / 2;
+  const rowH = 15;
+  const detailHeight = Math.ceil(detailRows.length / 2) * rowH + 8;
+  doc.rect(left, y, contentWidth, detailHeight).fill(COLORS.band);
+
+  detailRows.forEach(([label, value], i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = left + col * colW + 8;
+    const ry = y + 5 + row * rowH;
+    doc.font('Helvetica').fontSize(8).fillColor(COLORS.muted)
+      .text(`${label}:`, x, ry, { width: 105 });
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.ink)
+      .text(String(value), x + 108, ry, { width: colW - 120, ellipsis: true });
+  });
+  y += detailHeight + 12;
+
+  // ---------- Items table ----------
   const cols = [
-    { label: 'PRODUCT', w: 0.26, align: 'left' },
-    { label: 'FINISH', w: 0.11, align: 'left' },
-    { label: 'W (m)', w: 0.07, align: 'right' },
-    { label: 'H (m)', w: 0.07, align: 'right' },
-    { label: 'AREA (m²)', w: 0.09, align: 'right' },
-    { label: 'THK', w: 0.07, align: 'right' },
-    { label: 'QTY', w: 0.06, align: 'right' },
-    { label: 'PRICE/m²', w: 0.12, align: 'right' },
-    { label: 'TOTAL', w: 0.15, align: 'right' },
+    { key: 'description', label: 'Description', w: 0.17, align: 'left' },
+    { key: 'length', label: 'Length (m)', w: 0.075, align: 'right' },
+    { key: 'width', label: 'Width (m)', w: 0.07, align: 'right' },
+    { key: 'thickness', label: 'Thk (cm)', w: 0.065, align: 'right' },
+    { key: 'totalLength', label: 'Tot. Len (m)', w: 0.085, align: 'right' },
+    { key: 'quantity', label: 'Qty', w: 0.05, align: 'right' },
+    { key: 'area', label: 'Tot. Area (m²)', w: 0.095, align: 'right' },
+    { key: 'unitPrice', label: `Unit Price (${currency})`, w: 0.115, align: 'right' },
+    { key: 'lineTotal', label: `Amount (${currency})`, w: 0.115, align: 'right' },
+    { key: 'remark', label: 'Remark', w: 0.11, align: 'left' },
   ];
-  let x = left;
+  let xCursor = left;
   const colX = cols.map((col) => {
-    const pos = x;
-    x += col.w * contentWidth;
+    const pos = xCursor;
+    xCursor += col.w * contentWidth;
     return pos;
   });
 
   const drawHeaderRow = () => {
-    doc.rect(left, y, contentWidth, 20).fill(COLORS.accent);
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#ffffff');
+    doc.rect(left, y, contentWidth, 22).fill(COLORS.brand);
+    doc.font('Helvetica-Bold').fontSize(6.8).fillColor('#ffffff');
     cols.forEach((col, i) => {
-      doc.text(col.label, colX[i] + 4, y + 6, {
-        width: col.w * contentWidth - 8,
+      doc.text(col.label, colX[i] + 3, y + 7, {
+        width: col.w * contentWidth - 6,
         align: col.align,
       });
     });
-    y += 20;
+    y += 22;
   };
   drawHeaderRow();
 
-  doc.font('Helvetica').fontSize(8.5);
+  const rowValues = (item) => {
+    const isLinear = item.itemType === 'linear';
+    return {
+      description: item.description || item.productName || '',
+      length: num(item.length),
+      width: isLinear ? '—' : num(item.width),
+      // Stone is quoted in centimetres; thickness is stored in millimetres.
+      thickness: isLinear || item.thickness == null ? '—' : num(item.thickness / 10, 1),
+      totalLength: num(item.totalLength),
+      quantity: isLinear ? '—' : String(item.quantity),
+      area: isLinear ? '—' : num(item.area),
+      unitPrice: money(item.unitPrice),
+      lineTotal: money(item.lineTotal),
+      remark: item.remark || (isLinear ? 'per linear m' : ''),
+    };
+  };
+
   proforma.items.forEach((item, idx) => {
-    const nameLines = `${item.productName}\n${item.stoneCategory} · ${item.stoneColor}`;
-    const rowH = 26;
-    if (y + rowH > doc.page.height - 180) {
+    const values = rowValues(item);
+    const subLabel = [item.productName, item.stoneColor].filter(Boolean).join(' · ');
+    const h = subLabel ? 24 : 17;
+
+    if (y + h > doc.page.height - 150) {
       doc.addPage();
       y = 40;
       drawHeaderRow();
-      doc.font('Helvetica').fontSize(8.5);
     }
-    if (idx % 2 === 1) doc.rect(left, y, contentWidth, rowH).fill('#f8fafc');
-    doc.fillColor(COLORS.ink);
-    const values = [
-      nameLines,
-      item.finish,
-      item.width.toFixed(2),
-      item.height.toFixed(2),
-      item.area.toFixed(2),
-      `${item.thickness}mm`,
-      String(item.quantity),
-      Number(item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2 }),
-      Number(item.lineTotal).toLocaleString('en-US', { minimumFractionDigits: 2 }),
-    ];
-    values.forEach((val, i) => {
-      doc.font(i === 0 ? 'Helvetica-Bold' : 'Helvetica')
-        .fontSize(i === 0 ? 8 : 8.5)
-        .text(val, colX[i] + 4, y + 5, { width: cols[i].w * contentWidth - 8, align: cols[i].align });
+    if (idx % 2 === 1) doc.rect(left, y, contentWidth, h).fill(COLORS.zebra);
+
+    cols.forEach((col, i) => {
+      doc.font(col.key === 'description' ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(7.6).fillColor(COLORS.ink)
+        .text(values[col.key], colX[i] + 3, y + 5, {
+          width: col.w * contentWidth - 6, align: col.align, ellipsis: true,
+        });
     });
-    doc.moveTo(left, y + rowH).lineTo(right, y + rowH).lineWidth(0.5).stroke(COLORS.line);
-    y += rowH;
+    if (subLabel) {
+      doc.font('Helvetica').fontSize(6.4).fillColor(COLORS.muted)
+        .text(subLabel, colX[0] + 3, y + 15, { width: cols[0].w * contentWidth - 6, ellipsis: true });
+    }
+    doc.moveTo(left, y + h).lineTo(right, y + h).lineWidth(0.4).stroke(COLORS.line);
+    y += h;
   });
 
-  // ---- Totals ----
-  y += 12;
-  const totalsX = right - 220;
-  const totalRow = (label, value, bold = false) => {
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(bold ? 11 : 9)
-      .fillColor(bold ? COLORS.accent : COLORS.ink);
-    doc.text(label, totalsX, y, { width: 110 });
-    doc.text(value, totalsX + 110, y, { width: 110, align: 'right' });
-    y += bold ? 20 : 16;
+  // ---------- Totals ----------
+  y += 10;
+  if (y > doc.page.height - 190) { doc.addPage(); y = 40; }
+
+  const totalsX = right - 230;
+  const totalRow = (label, value, opts = {}) => {
+    const { bold = false, fill = null } = opts;
+    if (fill) doc.rect(totalsX, y - 3, 230, 20).fill(fill);
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(bold ? 10 : 8.5)
+      .fillColor(bold ? COLORS.brand : COLORS.ink);
+    doc.text(label, totalsX + 6, y + 1, { width: 118 });
+    doc.text(`${money(value)} ${currency}`, totalsX + 118, y + 1, { width: 106, align: 'right' });
+    y += bold ? 22 : 15;
   };
-  totalRow('Subtotal', money(proforma.subtotal, settings.currency));
-  if (proforma.discount > 0) totalRow('Discount', `- ${money(proforma.discount, settings.currency)}`);
-  totalRow(`VAT (${proforma.vatRate}%)`, money(proforma.vatAmount, settings.currency));
+
+  totalRow('Total Amount', proforma.subtotal);
+  if (proforma.discount > 0) totalRow('Discount', -proforma.discount);
+  totalRow(`${proforma.vatRate}% VAT`, proforma.vatAmount);
   doc.moveTo(totalsX, y).lineTo(right, y).lineWidth(1).stroke(COLORS.accent);
-  y += 6;
-  totalRow('GRAND TOTAL', money(proforma.grandTotal, settings.currency), true);
+  y += 5;
+  totalRow('Total amount inclusive of VAT', proforma.grandTotal, { bold: true, fill: COLORS.band });
 
-  // ---- Terms + QR + signature ----
-  const blockTop = Math.max(y + 10, doc.page.height - 220);
-  if (blockTop + 160 > doc.page.height - 40) doc.addPage();
-  const termsY = blockTop + 160 > doc.page.height - 40 ? 40 : blockTop;
+  // ---------- Terms, remarks, products, signatures ----------
+  const blockY = y + 8;
+  const colWidth = (contentWidth - 100) / 2;
 
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.ink).text('Terms & Conditions', left, termsY);
-  doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.muted);
-  const terms = [
-    proforma.paymentTerms && `Payment: ${proforma.paymentTerms}`,
-    proforma.deliveryTime && `Delivery: ${proforma.deliveryTime}`,
+  const bullets = (text) =>
+    String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
+    .text('Terms and Conditions', left, blockY);
+  doc.font('Helvetica').fontSize(7.8).fillColor(COLORS.ink);
+  const terms = bullets(settings.termsAndConditions);
+  if (proforma.paymentTerms && !terms.length) terms.push(proforma.paymentTerms);
+  doc.text(terms.map((t) => `•  ${t}`).join('\n'), left, blockY + 13, {
+    width: colWidth, lineGap: 2.5,
+  });
+
+  let rightColY = blockY;
+  const remarkLines = [
+    proforma.totalWeight && `Total weight: ${proforma.totalWeight}`,
+    proforma.remark,
+    proforma.notes,
     proforma.validityPeriod && `Validity: ${proforma.validityPeriod}`,
-    proforma.notes && `Notes: ${proforma.notes}`,
   ].filter(Boolean);
-  doc.text(terms.join('\n'), left, termsY + 14, { width: contentWidth - 260, lineGap: 3 });
 
-  // QR code
-  doc.image(qrPng, right - 90, termsY, { fit: [80, 80] });
-  doc.font('Helvetica').fontSize(7).fillColor(COLORS.muted)
-    .text('Scan to verify', right - 90, termsY + 84, { width: 80, align: 'center' });
-
-  // Signature
-  const sigY = termsY + 110;
-  doc.moveTo(left, sigY + 30).lineTo(left + 180, sigY + 30).lineWidth(0.5).stroke(COLORS.ink);
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.muted)
-    .text('Prepared by (Sales)', left, sigY + 34);
-  doc.moveTo(left + 220, sigY + 30).lineTo(left + 400, sigY + 30).stroke(COLORS.ink);
-  doc.text('Approved by', left + 220, sigY + 34);
-
-  if (proforma.status === 'approved') {
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#15803d')
-      .text('APPROVED', left + 220, sigY + 10);
+  if (remarkLines.length) {
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
+      .text('Remark', left + colWidth + 30, rightColY);
+    doc.font('Helvetica').fontSize(7.8).fillColor(COLORS.ink)
+      .text(remarkLines.join('\n'), left + colWidth + 30, rightColY + 13, {
+        width: colWidth - 60, lineGap: 2.5,
+      });
+    rightColY = doc.y + 6;
   }
 
-  // Footer on every page
+  if (settings.productsOffered) {
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.brand)
+      .text('Our products', left + colWidth + 30, rightColY);
+    doc.font('Helvetica').fontSize(7.4).fillColor(COLORS.muted)
+      .text(bullets(settings.productsOffered).join('\n'), left + colWidth + 30, rightColY + 13, {
+        width: colWidth - 60, lineGap: 1.5,
+      });
+  }
+
+  // QR + signatures pinned near the bottom of the last page.
+  const footY = Math.max(doc.y + 18, doc.page.height - 118);
+  doc.image(qrPng, right - 68, footY - 6, { fit: [62, 62] });
+  doc.font('Helvetica').fontSize(6).fillColor(COLORS.muted)
+    .text('Scan to verify', right - 68, footY + 58, { width: 62, align: 'center' });
+
+  const sigY = footY + 34;
+  doc.moveTo(left, sigY).lineTo(left + 150, sigY).lineWidth(0.6).stroke(COLORS.ink);
+  doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.muted)
+    .text(`Prepared by: ${proforma.salesPerson?.name || ''}`, left, sigY + 4);
+  doc.moveTo(left + 190, sigY).lineTo(left + 340, sigY).stroke(COLORS.ink);
+  doc.text('Approved by', left + 190, sigY + 4);
+  if (proforma.status === 'approved') {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#15803d')
+      .text('APPROVED', left + 190, sigY - 13);
+  }
+
+  // ---------- Footer on every page ----------
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    // Zero the bottom margin so the footer text doesn't trigger an auto page-break
+    // Zero the bottom margin so footer text never triggers an auto page-break.
     doc.page.margins.bottom = 0;
-    doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.muted)
+    doc.font('Helvetica').fontSize(6.8).fillColor(COLORS.muted)
       .text(
-        `${settings.companyName} — This proforma is not a tax invoice. Generated on ${fmtDate(new Date())}.`,
-        left,
-        doc.page.height - 30,
-        { width: contentWidth, align: 'center' }
+        `${settings.companyName} · Issued ${fmtDate(proforma.issueDate)} · ` +
+        `Valid until ${fmtDate(proforma.expiryDate)} · Page ${i - range.start + 1} of ${range.count}`,
+        left, doc.page.height - 24, { width: contentWidth, align: 'center' }
       );
   }
 
   doc.end();
-}
-
-function proformaNumberOf(proforma) {
-  return proforma.proformaNumber || '';
 }
 
 module.exports = { renderProformaPdf };

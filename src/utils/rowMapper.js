@@ -8,8 +8,8 @@ function toCamel(str) {
 // Column names whose NUMERIC/string values should surface as JS numbers.
 const NUMERIC_COLUMNS = new Set([
   'subtotal', 'discount', 'vat_rate', 'vat_amount', 'grand_total',
-  'default_unit_price', 'unit_price', 'line_total', 'area', 'width', 'height',
-  'default_vat_rate',
+  'default_unit_price', 'unit_price', 'line_total', 'area', 'total_length',
+  'length', 'width', 'default_vat_rate',
 ]);
 
 function mapRow(row) {

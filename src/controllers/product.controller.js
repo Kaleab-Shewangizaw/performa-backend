@@ -2,7 +2,9 @@ const ApiError = require('../utils/apiError');
 const asyncHandler = require('../utils/asyncHandler');
 const productModel = require('../models/product.model');
 const { parsePagination, parseSort, buildPagination } = require('../utils/query');
-const { STONE_CATEGORIES, FINISHES, THICKNESS_OPTIONS } = require('../utils/constants');
+const {
+  STONE_CATEGORIES, FINISHES, THICKNESS_OPTIONS, ELEMENT_TYPES, LINEAR_SERVICES, ITEM_TYPES,
+} = require('../utils/constants');
 
 const SORTABLE = {
   name: 'name',
@@ -33,6 +35,9 @@ const meta = asyncHandler(async (req, res) => {
     stoneCategories: STONE_CATEGORIES,
     finishes: FINISHES,
     thicknessOptions: THICKNESS_OPTIONS,
+    elementTypes: ELEMENT_TYPES,
+    linearServices: LINEAR_SERVICES,
+    itemTypes: ITEM_TYPES,
   });
 });
 

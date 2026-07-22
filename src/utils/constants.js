@@ -11,13 +11,39 @@ const PROFORMA_STATUSES = [
 // Statuses a sales user may still edit their own proforma in
 const EDITABLE_STATUSES = ['draft', 'pending', 'rejected'];
 
-const STONE_CATEGORIES = ['Granite', 'Marble', 'Quartz', 'Quartzite', 'Travertine'];
+const STONE_CATEGORIES = ['Granite', 'Marble', 'Quartz', 'Quartzite', 'Travertine', 'Limestone'];
 
 const FINISHES = ['Polished', 'Honed', 'Leathered', 'Flamed', 'Brushed'];
 
+// Millimetres. Displayed in centimetres on the proforma, matching how the
+// company quotes stone (3 cm, 2 cm, ...).
 const THICKNESS_OPTIONS = [10, 12, 15, 20, 30];
 
 const PRODUCT_STATUSES = ['active', 'inactive'];
+
+// An item is either cut to size and priced per square metre, or it is edge
+// work (bullnose, groove) priced per linear metre of finished edge.
+const ITEM_TYPES = ['area', 'linear'];
+
+// Construction elements the factory produces. Suggestions for the
+// "Description" column — free text is still accepted.
+const ELEMENT_TYPES = [
+  'Window sill',
+  'Door sill',
+  'Tread',
+  'Riser',
+  'Landing',
+  'Flamed Landing',
+  'Polished Landing',
+  'Skirting',
+  'Copping',
+  'Kitchen Top',
+  'Wall Cladding',
+  'Floor Tile',
+];
+
+// Edge/finishing work billed per linear metre.
+const LINEAR_SERVICES = ['Bullnose', 'Groove', 'Half Bullnose', 'Chamfer', 'Polishing'];
 
 const APPROVAL_ACTIONS = [
   'created',
@@ -44,6 +70,9 @@ module.exports = {
   FINISHES,
   THICKNESS_OPTIONS,
   PRODUCT_STATUSES,
+  ITEM_TYPES,
+  ELEMENT_TYPES,
+  LINEAR_SERVICES,
   APPROVAL_ACTIONS,
   NOTIFICATION_TYPES,
 };

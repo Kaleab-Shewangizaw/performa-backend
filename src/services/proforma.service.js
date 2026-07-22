@@ -12,39 +12,59 @@ function round2(n) {
 }
 
 // Builds item rows from request items, denormalizing product data and
-// computing area + line totals server-side.
+// computing lengths, areas and line totals server-side.
+//
+//   area items   : totalLength = length x qty      (running metres of stone)
+//                  area        = length x width x qty  (m2, what is billed)
+//                  lineTotal   = area x unitPrice
+//   linear items : edge work (bullnose, groove) billed per metre of edge
+//                  totalLength = length x qty
+//                  lineTotal   = totalLength x unitPrice
 async function buildItems(items) {
-  const productIds = [...new Set(items.map((i) => i.productId))];
-  const products = await productModel.findByIds(productIds);
+  const productIds = [...new Set(items.map((i) => i.productId).filter(Boolean))];
+  const products = productIds.length ? await productModel.findByIds(productIds) : [];
   const byId = new Map(products.map((p) => [p.id, p]));
 
   return items.map((item) => {
-    const product = byId.get(item.productId);
-    if (!product) throw new ApiError(400, `Product ${item.productId} not found`);
-    if (product.status !== 'active') {
-      throw new ApiError(400, `Product "${product.name}" is inactive`);
+    let product = null;
+    if (item.productId) {
+      product = byId.get(item.productId);
+      if (!product) throw new ApiError(400, `Product ${item.productId} not found`);
+      if (product.status !== 'active') {
+        throw new ApiError(400, `Product "${product.name}" is inactive`);
+      }
+      if (item.thickness != null && !product.thicknessOptions.includes(item.thickness)) {
+        throw new ApiError(
+          400,
+          `Thickness ${item.thickness}mm is not available for "${product.name}"`
+        );
+      }
     }
-    if (!product.thicknessOptions.includes(item.thickness)) {
-      throw new ApiError(
-        400,
-        `Thickness ${item.thickness}mm is not available for "${product.name}"`
-      );
-    }
-    const area = round2(item.width * item.height);
-    const unitPrice = item.unitPrice ?? product.defaultUnitPrice;
+
+    const quantity = item.quantity || 1;
+    const totalLength = round2(item.length * quantity);
+    const isLinear = item.itemType === 'linear';
+    const area = isLinear ? 0 : round2(item.length * item.width * quantity);
+    const unitPrice = item.unitPrice ?? product?.defaultUnitPrice ?? 0;
+    const lineTotal = round2((isLinear ? totalLength : area) * unitPrice);
+
     return {
-      productId: product.id,
-      productName: product.name,
-      stoneCategory: product.stoneCategory,
-      stoneColor: product.stoneColor,
-      finish: product.finish,
-      width: item.width,
-      height: item.height,
+      itemType: item.itemType,
+      description: item.description,
+      productId: product?.id ?? null,
+      productName: product?.name ?? null,
+      stoneCategory: product?.stoneCategory ?? null,
+      stoneColor: product?.stoneColor ?? null,
+      finish: product?.finish ?? null,
+      length: item.length,
+      width: isLinear ? null : item.width,
       area,
-      thickness: item.thickness,
-      quantity: item.quantity,
+      totalLength,
+      thickness: isLinear ? null : item.thickness,
+      quantity,
       unitPrice,
-      lineTotal: round2(area * item.quantity * unitPrice),
+      lineTotal,
+      remark: item.remark || '',
     };
   });
 }
@@ -60,6 +80,14 @@ function computeTotals(items, discount, vatRate) {
 
 function toDateOnly(date) {
   return date.toISOString().slice(0, 10);
+}
+
+// "Harer Granite"-style summary taken from the first catalogued line, used
+// when the sales person doesn't type the material themselves.
+function defaultMaterialType(items) {
+  const withProduct = items.find((i) => i.productName);
+  if (!withProduct) return '';
+  return [withProduct.stoneColor, withProduct.stoneCategory].filter(Boolean).join(' ');
 }
 
 async function createProforma(data, user) {
@@ -95,6 +123,14 @@ async function createProforma(data, user) {
     validityPeriod: data.validityPeriod || `${settings.defaultValidityDays} days`,
     notes: data.notes || '',
     status: data.asDraft ? 'draft' : 'pending',
+    orderNumber: data.orderNumber || '',
+    // Falls back to the stone used on the first catalogued line.
+    materialType: data.materialType || defaultMaterialType(items),
+    orderedBy: data.orderedBy || customer.fullName,
+    orderedDate: data.orderedDate || toDateOnly(issueDate),
+    projectName: data.projectName || '',
+    totalWeight: data.totalWeight || '',
+    remark: data.remark || '',
   });
 
   await approvalHistoryModel.create({
@@ -155,6 +191,13 @@ async function updateProforma(proforma, data, user) {
     notes: data.notes ?? proforma.notes,
     status,
     rejectionReason,
+    orderNumber: data.orderNumber ?? proforma.orderNumber,
+    materialType: data.materialType || defaultMaterialType(items),
+    orderedBy: data.orderedBy ?? proforma.orderedBy,
+    orderedDate: data.orderedDate || (proforma.orderedDate ? toDateOnly(new Date(proforma.orderedDate)) : null),
+    projectName: data.projectName ?? proforma.projectName,
+    totalWeight: data.totalWeight ?? proforma.totalWeight,
+    remark: data.remark ?? proforma.remark,
   });
 
   await approvalHistoryModel.create({
