@@ -11,6 +11,16 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
+// Measurements keep more precision than money: a 0.868 m² area must not
+// become 0.87 before it is multiplied by the unit price.
+function round4(n) {
+  return Math.round(n * 10000) / 10000;
+}
+
+function round3(n) {
+  return Math.round(n * 1000) / 1000;
+}
+
 // Builds item rows from request items, denormalizing product data and
 // computing lengths, areas and line totals server-side.
 //
@@ -42,9 +52,9 @@ async function buildItems(items) {
     }
 
     const quantity = item.quantity || 1;
-    const totalLength = round2(item.length * quantity);
+    const totalLength = round3(item.length * quantity);
     const isLinear = item.itemType === 'linear';
-    const area = isLinear ? 0 : round2(item.length * item.width * quantity);
+    const area = isLinear ? 0 : round4(item.length * item.width * quantity);
     const unitPrice = item.unitPrice ?? product?.defaultUnitPrice ?? 0;
     const lineTotal = round2((isLinear ? totalLength : area) * unitPrice);
 
