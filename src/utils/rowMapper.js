@@ -9,7 +9,7 @@ function toCamel(str) {
 const NUMERIC_COLUMNS = new Set([
   'subtotal', 'discount', 'vat_rate', 'vat_amount', 'grand_total',
   'default_unit_price', 'unit_price', 'line_total', 'area', 'total_length',
-  'length', 'width', 'default_vat_rate',
+  'length', 'width', 'thickness', 'default_vat_rate',
 ]);
 
 function mapRow(row) {

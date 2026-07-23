@@ -2,17 +2,18 @@ const { query } = require('../config/db');
 const { mapRow, mapRows } = require('../utils/rowMapper');
 
 const COLUMNS = `id, name, stone_category, stone_color, finish, thickness_options,
-                 default_unit_price, status, created_at, updated_at`;
+                 default_unit_price, status, allows_direct_approval, created_at, updated_at`;
 
 async function create(data) {
   const { rows } = await query(
     `INSERT INTO products
-       (name, stone_category, stone_color, finish, thickness_options, default_unit_price, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+       (name, stone_category, stone_color, finish, thickness_options, default_unit_price, status,
+        allows_direct_approval)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING ${COLUMNS}`,
     [
       data.name, data.stoneCategory, data.stoneColor, data.finish,
-      data.thicknessOptions, data.defaultUnitPrice, data.status,
+      data.thicknessOptions, data.defaultUnitPrice, data.status, data.allowsDirectApproval,
     ]
   );
   return mapRow(rows[0]);
@@ -75,12 +76,13 @@ async function update(id, data) {
   const { rows } = await query(
     `UPDATE products SET
        name = $2, stone_category = $3, stone_color = $4, finish = $5,
-       thickness_options = $6, default_unit_price = $7, status = $8, updated_at = now()
+       thickness_options = $6, default_unit_price = $7, status = $8,
+       allows_direct_approval = $9, updated_at = now()
      WHERE id = $1
      RETURNING ${COLUMNS}`,
     [
       id, data.name, data.stoneCategory, data.stoneColor, data.finish,
-      data.thicknessOptions, data.defaultUnitPrice, data.status,
+      data.thicknessOptions, data.defaultUnitPrice, data.status, data.allowsDirectApproval,
     ]
   );
   return mapRow(rows[0]);

@@ -1,37 +1,28 @@
 const { z } = require('zod');
-const { thicknessEnum } = require('./product.schema');
-const { ITEM_TYPES } = require('../utils/constants');
 
 // Postgres SERIAL ids arrive as numbers, but query/body values may be strings.
 const id = z.coerce.number().int().positive();
 
-// An item is either cut stone priced per m2, or edge work priced per linear metre.
-const itemSchema = z
-  .object({
-    itemType: z.enum(ITEM_TYPES).default('area'),
-    description: z.string().min(1, 'Description is required').max(200),
-    productId: id.optional().nullable(),
-    length: z.number().positive().max(10000),
-    width: z.number().positive().max(100).optional().nullable(),
-    thickness: thicknessEnum.optional().nullable(),
-    quantity: z.number().int().positive().max(100000).default(1),
-    unitPrice: z.number().nonnegative(),
-    remark: z.string().max(300).optional().default(''),
-  })
-  .superRefine((item, ctx) => {
-    if (item.itemType === 'area') {
-      if (item.width == null) {
-        ctx.addIssue({ code: 'custom', path: ['width'], message: 'Width is required for area items' });
-      }
-      if (item.thickness == null) {
-        ctx.addIssue({ code: 'custom', path: ['thickness'], message: 'Thickness is required for area items' });
-      }
-    }
-  });
+// One shape for every line. A width makes it cut stone priced per m²; leaving
+// the width out makes it edge work (bullnose, groove) priced per linear metre,
+// exactly as those rows read on the company's spreadsheet.
+const itemSchema = z.object({
+  description: z.string().min(1, 'Description is required').max(200),
+  productId: id.optional().nullable(),
+  length: z.number().positive().max(10000),
+  width: z.number().positive().max(100).optional().nullable(),
+  // Millimetres, typed freely — the product's sizes are only suggestions.
+  thickness: z.number().positive().max(1000).optional().nullable(),
+  quantity: z.number().int().positive().max(100000).default(1),
+  unitPrice: z.number().nonnegative(),
+  remark: z.string().max(300).optional().default(''),
+});
 
 const proformaSchema = z.object({
   customerId: id,
   orderNumber: z.string().max(50).optional().default(''),
+  // The stone for the whole order; applied to every line that doesn't name its own.
+  materialProductId: id.optional().nullable(),
   materialType: z.string().max(200).optional().default(''),
   orderedBy: z.string().max(200).optional().default(''),
   orderedDate: z.string().date().optional().nullable(),
@@ -40,6 +31,8 @@ const proformaSchema = z.object({
   expiryDate: z.string().date().optional(),
   items: z.array(itemSchema).min(1),
   discount: z.number().nonnegative().default(0),
+  // Any positive value is normalised to the company's standard rate; 0 waives
+  // VAT for the customer. Those are the only two outcomes.
   vatRate: z.number().min(0).max(100).optional(),
   paymentTerms: z.string().max(500).optional(),
   deliveryTime: z.string().max(300).optional(),

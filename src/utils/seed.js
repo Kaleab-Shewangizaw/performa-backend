@@ -39,8 +39,10 @@ const USERS = [
   { name: 'Sara Sales', email: 'sales@granite.com', password: 'sales1234', role: 'sales' },
 ];
 
+// `allowsDirectApproval` marks stock lines a sales person may quote without
+// supervisor/admin review.
 const PRODUCTS = [
-  { name: 'Harer Granite', stoneCategory: 'Granite', stoneColor: 'Harer', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 7000, status: 'active' },
+  { name: 'Harer Granite', stoneCategory: 'Granite', stoneColor: 'Harer', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 7000, status: 'active', allowsDirectApproval: true },
   { name: 'Absolute Black', stoneCategory: 'Granite', stoneColor: 'Black', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 6800, status: 'active' },
   { name: 'Kashmir White', stoneCategory: 'Granite', stoneColor: 'White/Grey', finish: 'Polished', thicknessOptions: [20, 30], defaultUnitPrice: 5200, status: 'active' },
   { name: 'Tan Brown', stoneCategory: 'Granite', stoneColor: 'Brown', finish: 'Flamed', thicknessOptions: [20, 30], defaultUnitPrice: 3900, status: 'active' },
@@ -49,7 +51,7 @@ const PRODUCTS = [
   { name: 'Calacatta Quartz', stoneCategory: 'Quartz', stoneColor: 'White/Gold', finish: 'Polished', thicknessOptions: [12, 20, 30], defaultUnitPrice: 8500, status: 'active' },
   { name: 'Grey Mist Quartz', stoneCategory: 'Quartz', stoneColor: 'Grey', finish: 'Leathered', thicknessOptions: [12, 20], defaultUnitPrice: 7800, status: 'active' },
   { name: 'Taj Mahal', stoneCategory: 'Quartzite', stoneColor: 'Cream', finish: 'Leathered', thicknessOptions: [20, 30], defaultUnitPrice: 9200, status: 'active' },
-  { name: 'Silver Travertine', stoneCategory: 'Travertine', stoneColor: 'Silver/Grey', finish: 'Brushed', thicknessOptions: [10, 12, 15], defaultUnitPrice: 3200, status: 'active' },
+  { name: 'Silver Travertine', stoneCategory: 'Travertine', stoneColor: 'Silver/Grey', finish: 'Brushed', thicknessOptions: [10, 12, 15], defaultUnitPrice: 3200, status: 'active', allowsDirectApproval: true },
   { name: 'Beige Limestone', stoneCategory: 'Limestone', stoneColor: 'Beige', finish: 'Honed', thicknessOptions: [15, 20, 30], defaultUnitPrice: 4100, status: 'active' },
 ];
 

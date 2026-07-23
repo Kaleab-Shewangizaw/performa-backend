@@ -5,7 +5,7 @@ const customerModel = require('../models/customer.model');
 const settingModel = require('../models/setting.model');
 const approvalHistoryModel = require('../models/approvalHistory.model');
 const notificationService = require('./notification.service');
-const { EDITABLE_STATUSES } = require('../utils/constants');
+const { EDIT_RULES } = require('../utils/constants');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -30,12 +30,14 @@ function round3(n) {
 //   linear items : edge work (bullnose, groove) billed per metre of edge
 //                  totalLength = length x qty
 //                  lineTotal   = totalLength x unitPrice
-async function buildItems(items) {
-  const productIds = [...new Set(items.map((i) => i.productId).filter(Boolean))];
+async function buildItems(items, materialProductId = null) {
+  // Every line inherits the order's material unless it names its own.
+  const resolved = items.map((i) => ({ ...i, productId: i.productId ?? materialProductId }));
+  const productIds = [...new Set(resolved.map((i) => i.productId).filter(Boolean))];
   const products = productIds.length ? await productModel.findByIds(productIds) : [];
   const byId = new Map(products.map((p) => [p.id, p]));
 
-  return items.map((item) => {
+  return resolved.map((item) => {
     let product = null;
     if (item.productId) {
       product = byId.get(item.productId);
@@ -43,23 +45,22 @@ async function buildItems(items) {
       if (product.status !== 'active') {
         throw new ApiError(400, `Product "${product.name}" is inactive`);
       }
-      if (item.thickness != null && !product.thicknessOptions.includes(item.thickness)) {
-        throw new ApiError(
-          400,
-          `Thickness ${item.thickness}mm is not available for "${product.name}"`
-        );
-      }
+      // Thickness is not constrained to the catalog's presets: the factory
+      // cuts to whatever the job needs.
     }
 
     const quantity = item.quantity || 1;
     const totalLength = round3(item.length * quantity);
-    const isLinear = item.itemType === 'linear';
+    // No width means the line is edge work billed by the running metre.
+    const isLinear = item.width == null || Number(item.width) === 0;
     const area = isLinear ? 0 : round4(item.length * item.width * quantity);
     const unitPrice = item.unitPrice ?? product?.defaultUnitPrice ?? 0;
     const lineTotal = round2((isLinear ? totalLength : area) * unitPrice);
 
     return {
-      itemType: item.itemType,
+      // Transient: used to decide auto-approval, not a stored column.
+      allowsDirectApproval: product?.allowsDirectApproval === true,
+      itemType: isLinear ? 'linear' : 'area',
       description: item.description,
       productId: product?.id ?? null,
       productName: product?.name ?? null,
@@ -77,6 +78,29 @@ async function buildItems(items) {
       remark: item.remark || '',
     };
   });
+}
+
+// The company charges either the standard rate or waives VAT entirely for a
+// customer — never an arbitrary percentage.
+function normalizeVatRate(requested, settings) {
+  if (requested === undefined || requested === null) return settings.defaultVatRate;
+  return Number(requested) > 0 ? settings.defaultVatRate : 0;
+}
+
+// A proforma skips the approval chain only when every line is a catalogued
+// product that has been pre-cleared. A free-text line, or any product without
+// the flag, sends it through the normal supervisor → admin review.
+function qualifiesForDirectApproval(items) {
+  return items.length > 0 && items.every((i) => i.allowsDirectApproval);
+}
+
+// Same rule for items already stored (which expose the product id as `product`
+// and carry no transient flag), re-checked against the current catalog.
+async function storedItemsQualify(items) {
+  if (!items.length || items.some((i) => !i.product)) return false;
+  const products = await productModel.findByIds([...new Set(items.map((i) => i.product))]);
+  const byId = new Map(products.map((p) => [p.id, p]));
+  return items.every((i) => byId.get(i.product)?.allowsDirectApproval === true);
 }
 
 function computeTotals(items, discount, vatRate) {
@@ -105,9 +129,11 @@ async function createProforma(data, user) {
   if (!customer) throw new ApiError(400, 'Customer not found');
 
   const settings = await settingModel.get();
-  const items = await buildItems(data.items);
-  const vatRate = data.vatRate ?? settings.defaultVatRate;
+  const items = await buildItems(data.items, data.materialProductId);
+  const vatRate = normalizeVatRate(data.vatRate, settings);
   const totals = computeTotals(items, data.discount || 0, vatRate);
+
+  const autoApproved = !data.asDraft && qualifiesForDirectApproval(items);
 
   const issueDate = data.issueDate ? new Date(data.issueDate) : new Date();
   const expiryDate = data.expiryDate
@@ -132,7 +158,8 @@ async function createProforma(data, user) {
     deliveryTime: data.deliveryTime || '',
     validityPeriod: data.validityPeriod || `${settings.defaultValidityDays} days`,
     notes: data.notes || '',
-    status: data.asDraft ? 'draft' : 'pending',
+    status: data.asDraft ? 'draft' : autoApproved ? 'approved' : 'pending',
+    autoApproved,
     orderNumber: data.orderNumber || '',
     // Falls back to the stone used on the first catalogued line.
     materialType: data.materialType || defaultMaterialType(items),
@@ -149,17 +176,42 @@ async function createProforma(data, user) {
     actorId: user.id,
   });
 
+  if (autoApproved) {
+    await recordAutoApproval(proforma, user);
+  }
+
   return proforma;
 }
 
+// Shared by create and submit: log the skip and tell the sales person.
+async function recordAutoApproval(proforma, user) {
+  await approvalHistoryModel.create({
+    proformaId: proforma.id,
+    action: 'auto_approved',
+    actorId: user.id,
+    comment: 'All items are pre-approved products — no review required',
+  });
+  await notificationService.notify(proforma.salesPerson?.id ?? user.id, {
+    type: 'proforma_auto_approved',
+    message: `Proforma ${proforma.proformaNumber} was approved automatically (pre-approved products)`,
+    proformaId: proforma.id,
+  });
+}
+
+// Admin may edit at any stage. Sales are limited to their own, pre-approval.
+// Supervisors may edit any proforma until it has final approval.
 function assertEditable(proforma, user) {
-  if (user.role === 'sales') {
-    if (proforma.salesPerson.id !== user.id) {
-      throw new ApiError(403, 'You can only edit your own proformas');
-    }
-    if (!EDITABLE_STATUSES.includes(proforma.status)) {
-      throw new ApiError(403, 'This proforma has been approved and can no longer be edited');
-    }
+  if (user.role === 'admin') return;
+
+  const allowed = EDIT_RULES[user.role];
+  if (!allowed) {
+    throw new ApiError(403, 'You do not have permission to edit proformas');
+  }
+  if (user.role === 'sales' && proforma.salesPerson.id !== user.id) {
+    throw new ApiError(403, 'You can only edit your own proformas');
+  }
+  if (!allowed.includes(proforma.status)) {
+    throw new ApiError(403, 'This proforma has been approved and can no longer be edited');
   }
 }
 
@@ -173,8 +225,12 @@ async function updateProforma(proforma, data, user) {
     customerId = customer.id;
   }
 
-  const items = await buildItems(data.items);
-  const vatRate = data.vatRate ?? proforma.vatRate;
+  const settings = await settingModel.get();
+  const items = await buildItems(data.items, data.materialProductId);
+  const vatRate = normalizeVatRate(
+    data.vatRate === undefined ? proforma.vatRate : data.vatRate,
+    settings
+  );
   const totals = computeTotals(items, data.discount || 0, vatRate);
 
   // A rejected proforma that gets edited goes back to pending review;
@@ -226,10 +282,18 @@ async function submitProforma(proforma, user) {
   if (proforma.status !== 'draft') {
     throw new ApiError(400, 'Only draft proformas can be submitted');
   }
-  const updated = await proformaModel.updateStatus(proforma.id, { status: 'pending' });
+
+  // A draft made entirely of pre-approved products clears on submission.
+  const autoApproved = await storedItemsQualify(proforma.items);
+
+  const updated = await proformaModel.updateStatus(proforma.id, {
+    status: autoApproved ? 'approved' : 'pending',
+    autoApproved,
+  });
   await approvalHistoryModel.create({
     proformaId: proforma.id, action: 'submitted', actorId: user.id,
   });
+  if (autoApproved) await recordAutoApproval(proforma, user);
   return updated;
 }
 
@@ -288,6 +352,8 @@ async function reject(proforma, user, reason) {
     rejectionReason: reason,
     supervisorApprovedBy: null,
     adminApprovedBy: null,
+    // A human overrode the shortcut; re-approval must also be human.
+    autoApproved: false,
   });
 
   await approvalHistoryModel.create({

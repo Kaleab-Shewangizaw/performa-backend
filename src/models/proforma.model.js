@@ -58,15 +58,15 @@ async function create(data) {
           subtotal, discount, vat_rate, vat_amount, grand_total,
           payment_terms, delivery_time, validity_period, notes, status,
           order_number, material_type, ordered_by, ordered_date, project_name,
-          total_weight, remark)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+          total_weight, remark, auto_approved)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
        RETURNING id`,
       [
         data.proformaNumber, data.customerId, data.salesPersonId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes, data.status,
         data.orderNumber, data.materialType, data.orderedBy, data.orderedDate, data.projectName,
-        data.totalWeight, data.remark,
+        data.totalWeight, data.remark, data.autoApproved || false,
       ]
     );
     const proformaId = rows[0].id;
@@ -202,6 +202,10 @@ async function updateStatus(id, fields) {
     sets.push(fields.adminApprovedBy === null
       ? 'admin_approved_at = NULL'
       : 'admin_approved_at = now()');
+  }
+  if (fields.autoApproved !== undefined) {
+    params.push(fields.autoApproved);
+    sets.push(`auto_approved = $${params.length}`);
   }
 
   await query(`UPDATE proformas SET ${sets.join(', ')} WHERE id = $1`, params);
