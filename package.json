@@ -4,11 +4,16 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --no-experimental-fetch server.js",
     "dev": "nodemon server.js",
-    "seed": "node src/utils/seed.js",
+    "seed": "node --no-experimental-fetch src/utils/seed.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "migrate": "node src/db/migrate.js"
+    "migrate": "node --no-experimental-fetch src/db/migrate.js",
+    "build:client": "bash scripts/build-client.sh",
+    "deploy:setup": "npm run migrate && npm run seed"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "repository": {
     "type": "git",

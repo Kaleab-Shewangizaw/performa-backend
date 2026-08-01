@@ -1,7 +1,15 @@
 const { Pool } = require('pg');
 const env = require('./env');
 
-const pool = new Pool({ connectionString: env.databaseUrl });
+// Managed PostgreSQL (e.g. cPanel) often requires SSL for TCP connections but
+// serves a self-signed cert, so verification is disabled. Enable with
+// DB_SSL=true, or equivalently put ?sslmode=no-verify on DATABASE_URL.
+const poolConfig = { connectionString: env.databaseUrl };
+if (env.dbSsl) {
+  poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle Postgres client', err);
