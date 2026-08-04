@@ -22,8 +22,10 @@ module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
   databaseUrl: process.env.DATABASE_URL,
-  // Connect over SSL without CA verification (self-signed managed Postgres).
-  dbSsl: /^(1|true|require|yes|on)$/i.test(process.env.DB_SSL || ''),
+  // On cPanel, MySQL grants are @'localhost' (socket). Set DB_SOCKET_PATH to
+  // the server's MySQL socket (e.g. /var/lib/mysql/mysql.sock) to connect that
+  // way; leave empty locally to use the host:port from DATABASE_URL.
+  dbSocketPath: process.env.DB_SOCKET_PATH || '',
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
