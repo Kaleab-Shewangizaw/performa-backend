@@ -2,21 +2,41 @@
 // Applied files are tracked in the schema_migrations table.
 const fs = require('fs');
 const path = require('path');
-const { pool } = require('../config/db');
+const mysql = require('mysql2/promise');
+const env = require('../config/env');
 
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
+function connectionConfig() {
+  const url = new URL(env.databaseUrl);
+  const cfg = {
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, ''),
+    charset: 'utf8mb4',
+    // Migration files contain multiple statements.
+    multipleStatements: true,
+  };
+  if (env.dbSocketPath) {
+    cfg.socketPath = env.dbSocketPath;
+  } else {
+    cfg.host = url.hostname || '127.0.0.1';
+    cfg.port = url.port ? Number(url.port) : 3306;
+  }
+  return cfg;
+}
+
 async function migrate() {
-  const client = await pool.connect();
+  const conn = await mysql.createConnection(connectionConfig());
   try {
-    await client.query(`
+    await conn.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         name       VARCHAR(255) PRIMARY KEY,
-        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
+        applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
-    const { rows } = await client.query('SELECT name FROM schema_migrations');
+    const [rows] = await conn.query('SELECT name FROM schema_migrations');
     const applied = new Set(rows.map((r) => r.name));
 
     const files = fs
@@ -30,21 +50,20 @@ async function migrate() {
         continue;
       }
       const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
-      await client.query('BEGIN');
+      await conn.beginTransaction();
       try {
-        await client.query(sql);
-        await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
-        await client.query('COMMIT');
+        await conn.query(sql);
+        await conn.query('INSERT INTO schema_migrations (name) VALUES (?)', [file]);
+        await conn.commit();
         console.log(`  applied ${file}`);
       } catch (err) {
-        await client.query('ROLLBACK');
+        await conn.rollback();
         throw new Error(`Migration ${file} failed: ${err.message}`);
       }
     }
     console.log('Migrations up to date.');
   } finally {
-    client.release();
-    await pool.end();
+    await conn.end();
   }
 }
 
