@@ -9,16 +9,21 @@ function errorHandler(err, req, res, next) {
     return res.status(err.statusCode).json({ error: err.message, details: err.details });
   }
 
-  // Postgres error codes
+  // MySQL / MariaDB driver error codes
   switch (err.code) {
-    case '23505': // unique_violation
+    case 'ER_DUP_ENTRY':
       return res.status(409).json({ error: 'A record with these details already exists' });
-    case '23503': // foreign_key_violation
-      return res.status(400).json({ error: 'Referenced record does not exist or is still in use' });
-    case '23514': // check_violation
-      return res.status(400).json({ error: 'A value is outside the allowed range' });
-    case '22P02': // invalid_text_representation
-      return res.status(400).json({ error: 'Invalid value format' });
+    case 'ER_NO_REFERENCED_ROW':
+    case 'ER_NO_REFERENCED_ROW_2':
+      return res.status(400).json({ error: 'Referenced record does not exist' });
+    case 'ER_ROW_IS_REFERENCED':
+    case 'ER_ROW_IS_REFERENCED_2':
+      return res.status(400).json({ error: 'This record is still in use and cannot be removed' });
+    case 'ER_DATA_TOO_LONG':
+      return res.status(400).json({ error: 'A value is too long' });
+    case 'WARN_DATA_TRUNCATED':
+    case 'ER_TRUNCATED_WRONG_VALUE':
+      return res.status(400).json({ error: 'A value has the wrong format' });
     default:
       break;
   }
