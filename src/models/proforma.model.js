@@ -5,16 +5,19 @@ const ITEM_COLUMNS = `id, item_type, description, product_id, product_name, ston
                       stone_color, finish, length, width, area, total_length, thickness,
                       quantity, unit_price, line_total, remark`;
 
-// Reads join customer/sales-person/approver rows and nest them, matching the
-// shape the API has always returned (customer: {...}, salesPerson: {...}).
+// Reads join customer/sales-person/approver rows and nest them as JSON objects
+// (with camelCase keys), matching the shape the API has always returned. The
+// computed objects get distinct aliases so they don't collide with p.* columns.
 const SELECT_WITH_RELATIONS = `
   SELECT p.*,
-         row_to_json(c.*) AS customer,
-         json_build_object('id', sp.id, 'name', sp.name, 'email', sp.email, 'role', sp.role) AS sales_person,
+         JSON_OBJECT('id', c.id, 'fullName', c.full_name, 'companyName', c.company_name,
+                     'phone', c.phone, 'email', c.email, 'address', c.address, 'city', c.city,
+                     'taxNumber', c.tax_number, 'notes', c.notes) AS customer_json,
+         JSON_OBJECT('id', sp.id, 'name', sp.name, 'email', sp.email, 'role', sp.role) AS sales_person_json,
          CASE WHEN sa.id IS NULL THEN NULL
-              ELSE json_build_object('id', sa.id, 'name', sa.name, 'email', sa.email) END AS supervisor_approved_by,
+              ELSE JSON_OBJECT('id', sa.id, 'name', sa.name, 'email', sa.email) END AS supervisor_json,
          CASE WHEN aa.id IS NULL THEN NULL
-              ELSE json_build_object('id', aa.id, 'name', aa.name, 'email', aa.email) END AS admin_approved_by
+              ELSE JSON_OBJECT('id', aa.id, 'name', aa.name, 'email', aa.email) END AS admin_json
     FROM proformas p
     JOIN customers c ON c.id = p.customer_id
     JOIN users sp ON sp.id = p.sales_person_id
@@ -22,24 +25,34 @@ const SELECT_WITH_RELATIONS = `
     LEFT JOIN users aa ON aa.id = p.admin_approved_by
 `;
 
+function parseJson(v) {
+  return typeof v === 'string' ? JSON.parse(v) : v;
+}
+
 function shape(row, items) {
   if (!row) return null;
   const p = mapRow(row);
-  // customer arrives as raw JSON with snake_case keys; normalize it too.
-  p.customer = mapRow(p.customer);
+  p.customer = parseJson(p.customerJson);
+  p.salesPerson = parseJson(p.salesPersonJson);
+  p.supervisorApprovedBy = parseJson(p.supervisorJson);
+  p.adminApprovedBy = parseJson(p.adminJson);
+  delete p.customerJson;
+  delete p.salesPersonJson;
+  delete p.supervisorJson;
+  delete p.adminJson;
   p.items = items || [];
   return p;
 }
 
-async function insertItems(client, proformaId, items) {
+async function insertItems(tx, proformaId, items) {
   let order = 0;
   for (const item of items) {
-    await client.query(
+    await tx.query(
       `INSERT INTO proforma_items
          (proforma_id, item_type, description, product_id, product_name, stone_category,
           stone_color, finish, length, width, area, total_length, thickness, quantity,
           unit_price, line_total, remark, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         proformaId, item.itemType, item.description, item.productId, item.productName,
         item.stoneCategory, item.stoneColor, item.finish, item.length, item.width,
@@ -51,44 +64,43 @@ async function insertItems(client, proformaId, items) {
 }
 
 async function create(data) {
-  const id = await withTransaction(async (client) => {
-    const { rows } = await client.query(
+  const id = await withTransaction(async (tx) => {
+    const res = await tx.query(
       `INSERT INTO proformas
          (proforma_number, customer_id, sales_person_id, issue_date, expiry_date,
           subtotal, discount, vat_rate, vat_amount, grand_total,
           payment_terms, delivery_time, validity_period, notes, status,
           order_number, material_type, ordered_by, ordered_date, project_name,
           total_weight, remark, auto_approved)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
-       RETURNING id`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         data.proformaNumber, data.customerId, data.salesPersonId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes, data.status,
         data.orderNumber, data.materialType, data.orderedBy, data.orderedDate, data.projectName,
-        data.totalWeight, data.remark, data.autoApproved || false,
+        data.totalWeight, data.remark, data.autoApproved ? 1 : 0,
       ]
     );
-    const proformaId = rows[0].id;
-    await insertItems(client, proformaId, data.items);
+    const proformaId = res.insertId;
+    await insertItems(tx, proformaId, data.items);
     return proformaId;
   });
   return findById(id);
 }
 
 async function findById(id) {
-  const { rows } = await query(`${SELECT_WITH_RELATIONS} WHERE p.id = $1`, [id]);
+  const rows = await query(`${SELECT_WITH_RELATIONS} WHERE p.id = ?`, [id]);
   if (!rows[0]) return null;
   const items = await findItems(id);
   return shape(rows[0], items);
 }
 
 async function findItems(proformaId) {
-  const { rows } = await query(
-    `SELECT ${ITEM_COLUMNS} FROM proforma_items WHERE proforma_id = $1 ORDER BY sort_order`,
+  const rows = await query(
+    `SELECT ${ITEM_COLUMNS} FROM proforma_items WHERE proforma_id = ? ORDER BY sort_order`,
     [proformaId]
   );
-  // product_id is exposed as `product` for API compatibility with the old schema.
+  // product_id is exposed as `product` for API compatibility.
   return mapRows(rows).map(({ productId, ...rest }) => ({ ...rest, product: productId }));
 }
 
@@ -97,50 +109,44 @@ async function list({ salesPersonId, status, customerId, search, from, to, sort,
   const params = [];
 
   if (salesPersonId) {
+    conditions.push('p.sales_person_id = ?');
     params.push(salesPersonId);
-    conditions.push(`p.sales_person_id = $${params.length}`);
   }
   if (status) {
+    conditions.push('p.status = ?');
     params.push(status);
-    conditions.push(`p.status = $${params.length}`);
   }
   if (customerId) {
+    conditions.push('p.customer_id = ?');
     params.push(customerId);
-    conditions.push(`p.customer_id = $${params.length}`);
   }
   if (search) {
+    conditions.push('p.proforma_number LIKE ?');
     params.push(`%${search}%`);
-    conditions.push(`p.proforma_number ILIKE $${params.length}`);
   }
   if (from) {
+    conditions.push('p.issue_date >= ?');
     params.push(from);
-    conditions.push(`p.issue_date >= $${params.length}`);
   }
   if (to) {
+    conditions.push('p.issue_date <= ?');
     params.push(to);
-    conditions.push(`p.issue_date <= $${params.length}`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const { rows: countRows } = await query(
-    `SELECT COUNT(*)::int AS total FROM proformas p ${where}`,
-    params
-  );
-
-  params.push(limit, offset);
-  const { rows } = await query(
-    `${SELECT_WITH_RELATIONS} ${where}
-     ORDER BY ${sort} LIMIT $${params.length - 1} OFFSET $${params.length}`,
-    params
+  const countRows = await query(`SELECT COUNT(*) AS total FROM proformas p ${where}`, params);
+  const rows = await query(
+    `${SELECT_WITH_RELATIONS} ${where} ORDER BY ${sort} LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
   );
 
   // Attach items for every listed proforma in one round-trip.
   const ids = rows.map((r) => r.id);
   const itemsById = new Map(ids.map((id) => [id, []]));
   if (ids.length) {
-    const { rows: itemRows } = await query(
+    const itemRows = await query(
       `SELECT proforma_id, ${ITEM_COLUMNS} FROM proforma_items
-       WHERE proforma_id = ANY($1::int[]) ORDER BY proforma_id, sort_order`,
+       WHERE proforma_id IN (?) ORDER BY proforma_id, sort_order`,
       [ids]
     );
     for (const raw of mapRows(itemRows)) {
@@ -156,76 +162,77 @@ async function list({ salesPersonId, status, customerId, search, from, to, sort,
 }
 
 async function replaceItemsAndTotals(id, data) {
-  await withTransaction(async (client) => {
-    await client.query(
+  await withTransaction(async (tx) => {
+    await tx.query(
       `UPDATE proformas SET
-         customer_id = $2, issue_date = $3, expiry_date = $4,
-         subtotal = $5, discount = $6, vat_rate = $7, vat_amount = $8, grand_total = $9,
-         payment_terms = $10, delivery_time = $11, validity_period = $12, notes = $13,
-         status = $14, rejection_reason = $15,
-         order_number = $16, material_type = $17, ordered_by = $18, ordered_date = $19,
-         project_name = $20, total_weight = $21, remark = $22, updated_at = now()
-       WHERE id = $1`,
+         customer_id = ?, issue_date = ?, expiry_date = ?,
+         subtotal = ?, discount = ?, vat_rate = ?, vat_amount = ?, grand_total = ?,
+         payment_terms = ?, delivery_time = ?, validity_period = ?, notes = ?,
+         status = ?, rejection_reason = ?,
+         order_number = ?, material_type = ?, ordered_by = ?, ordered_date = ?,
+         project_name = ?, total_weight = ?, remark = ?
+       WHERE id = ?`,
       [
-        id, data.customerId, data.issueDate, data.expiryDate,
+        data.customerId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes,
         data.status, data.rejectionReason,
         data.orderNumber, data.materialType, data.orderedBy, data.orderedDate,
-        data.projectName, data.totalWeight, data.remark,
+        data.projectName, data.totalWeight, data.remark, id,
       ]
     );
-    await client.query('DELETE FROM proforma_items WHERE proforma_id = $1', [id]);
-    await insertItems(client, id, data.items);
+    await tx.query('DELETE FROM proforma_items WHERE proforma_id = ?', [id]);
+    await insertItems(tx, id, data.items);
   });
   return findById(id);
 }
 
 async function updateStatus(id, fields) {
-  const sets = ['status = $2', 'updated_at = now()'];
-  const params = [id, fields.status];
+  const sets = ['status = ?'];
+  const params = [fields.status];
 
   if (fields.rejectionReason !== undefined) {
+    sets.push('rejection_reason = ?');
     params.push(fields.rejectionReason);
-    sets.push(`rejection_reason = $${params.length}`);
   }
   if (fields.supervisorApprovedBy !== undefined) {
+    sets.push('supervisor_approved_by = ?');
     params.push(fields.supervisorApprovedBy);
-    sets.push(`supervisor_approved_by = $${params.length}`);
     sets.push(fields.supervisorApprovedBy === null
       ? 'supervisor_approved_at = NULL'
-      : 'supervisor_approved_at = now()');
+      : 'supervisor_approved_at = NOW()');
   }
   if (fields.adminApprovedBy !== undefined) {
+    sets.push('admin_approved_by = ?');
     params.push(fields.adminApprovedBy);
-    sets.push(`admin_approved_by = $${params.length}`);
     sets.push(fields.adminApprovedBy === null
       ? 'admin_approved_at = NULL'
-      : 'admin_approved_at = now()');
+      : 'admin_approved_at = NOW()');
   }
   if (fields.autoApproved !== undefined) {
-    params.push(fields.autoApproved);
-    sets.push(`auto_approved = $${params.length}`);
+    sets.push('auto_approved = ?');
+    params.push(fields.autoApproved ? 1 : 0);
   }
 
-  await query(`UPDATE proformas SET ${sets.join(', ')} WHERE id = $1`, params);
+  params.push(id);
+  await query(`UPDATE proformas SET ${sets.join(', ')} WHERE id = ?`, params);
   return findById(id);
 }
 
 async function remove(id) {
-  const { rowCount } = await query('DELETE FROM proformas WHERE id = $1', [id]);
-  return rowCount > 0;
+  const res = await query('DELETE FROM proformas WHERE id = ?', [id]);
+  return res.affectedRows > 0;
 }
 
+// Atomic per-year sequence via the LAST_INSERT_ID() trick.
 async function nextNumber(prefix, year) {
-  // ON CONFLICT ... DO UPDATE is atomic; safe under concurrency (PG 9.5+).
-  const { rows } = await query(
-    `INSERT INTO counters (key, seq) VALUES ($1, 1)
-     ON CONFLICT (key) DO UPDATE SET seq = counters.seq + 1
-     RETURNING seq`,
+  const res = await query(
+    'INSERT INTO counters (`key`, seq) VALUES (?, LAST_INSERT_ID(1)) ' +
+      'ON DUPLICATE KEY UPDATE seq = LAST_INSERT_ID(seq + 1)',
     [`proforma-${year}`]
   );
-  return `${prefix}-${year}-${String(rows[0].seq).padStart(4, '0')}`;
+  const seq = res.insertId;
+  return `${prefix}-${year}-${String(seq).padStart(4, '0')}`;
 }
 
 // ---- aggregates used by dashboards ----
@@ -234,46 +241,44 @@ async function statusCounts(salesPersonId) {
   const params = [];
   let where = '';
   if (salesPersonId) {
+    where = 'WHERE sales_person_id = ?';
     params.push(salesPersonId);
-    where = 'WHERE sales_person_id = $1';
   }
-  const { rows } = await query(
-    `SELECT status, COUNT(*)::int AS count, COALESCE(SUM(grand_total), 0) AS total
+  const rows = await query(
+    `SELECT status, COUNT(*) AS count, COALESCE(SUM(grand_total), 0) AS total
        FROM proformas ${where} GROUP BY status`,
     params
   );
-  return rows.map((r) => ({ status: r.status, count: r.count, total: Number(r.total) }));
+  return rows.map((r) => ({ status: r.status, count: Number(r.count), total: Number(r.total) }));
 }
 
 async function approvedRevenue() {
-  const { rows } = await query(
-    `SELECT COALESCE(SUM(grand_total), 0) AS revenue FROM proformas WHERE status = 'approved'`
+  const rows = await query(
+    "SELECT COALESCE(SUM(grand_total), 0) AS revenue FROM proformas WHERE status = 'approved'"
   );
   return Number(rows[0].revenue);
 }
 
 async function monthlyRevenue(limit = 12) {
-  const { rows } = await query(
-    `SELECT EXTRACT(YEAR FROM issue_date)::int AS year,
-            EXTRACT(MONTH FROM issue_date)::int AS month,
-            SUM(grand_total) AS revenue,
-            COUNT(*)::int AS count
+  const rows = await query(
+    `SELECT YEAR(issue_date) AS year, MONTH(issue_date) AS month,
+            SUM(grand_total) AS revenue, COUNT(*) AS count
        FROM proformas
       WHERE status = 'approved'
-      GROUP BY year, month
+      GROUP BY YEAR(issue_date), MONTH(issue_date)
       ORDER BY year, month
-      LIMIT $1`,
+      LIMIT ?`,
     [limit]
   );
   return rows.map((r) => ({
-    year: r.year, month: r.month, revenue: Number(r.revenue), count: r.count,
+    year: Number(r.year), month: Number(r.month), revenue: Number(r.revenue), count: Number(r.count),
   }));
 }
 
 async function countApprovedBySupervisorSince(userId, since) {
-  const { rows } = await query(
-    `SELECT COUNT(*)::int AS count FROM proformas
-      WHERE supervisor_approved_by = $1 AND supervisor_approved_at >= $2`,
+  const rows = await query(
+    `SELECT COUNT(*) AS count FROM proformas
+      WHERE supervisor_approved_by = ? AND supervisor_approved_at >= ?`,
     [userId, since]
   );
   return rows[0].count;

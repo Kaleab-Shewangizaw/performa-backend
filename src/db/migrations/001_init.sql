@@ -1,30 +1,31 @@
--- Granite Factory Proforma Management System
--- Target: PostgreSQL 10 (no generated columns, no gen_random_uuid built-in)
+-- Granite Factory Proforma Management System — MySQL / MariaDB schema.
+-- Consolidated final schema (enums for fixed value sets, JSON for arrays,
+-- no RETURNING/CHECK so it runs on MySQL 5.7+ and MariaDB 10.2+).
 
 CREATE TABLE IF NOT EXISTS users (
-  id            SERIAL PRIMARY KEY,
+  id            INT AUTO_INCREMENT PRIMARY KEY,
   name          VARCHAR(200) NOT NULL,
   email         VARCHAR(200) NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role          VARCHAR(20) NOT NULL DEFAULT 'sales'
-                CHECK (role IN ('sales', 'supervisor', 'admin')),
-  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  password_hash VARCHAR(255) NOT NULL,
+  role          ENUM('sales','supervisor','admin') NOT NULL DEFAULT 'sales',
+  is_active     TINYINT(1) NOT NULL DEFAULT 1,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id         SERIAL PRIMARY KEY,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash TEXT NOT NULL UNIQUE,
-  expires_at TIMESTAMPTZ NOT NULL,
-  revoked_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,
+  token_hash VARCHAR(255) NOT NULL UNIQUE,
+  expires_at DATETIME NOT NULL,
+  revoked_at DATETIME NULL DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_refresh_tokens_user (user_id),
+  CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS customers (
-  id           SERIAL PRIMARY KEY,
+  id           INT AUTO_INCREMENT PRIMARY KEY,
   full_name    VARCHAR(200) NOT NULL,
   company_name VARCHAR(200) NOT NULL DEFAULT '',
   phone        VARCHAR(50) NOT NULL,
@@ -32,130 +33,148 @@ CREATE TABLE IF NOT EXISTS customers (
   address      VARCHAR(500) NOT NULL DEFAULT '',
   city         VARCHAR(100) NOT NULL DEFAULT '',
   tax_number   VARCHAR(100) NOT NULL DEFAULT '',
-  notes        TEXT NOT NULL DEFAULT '',
-  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_customers_full_name ON customers(lower(full_name));
-CREATE INDEX IF NOT EXISTS idx_customers_company ON customers(lower(company_name));
+  notes        VARCHAR(2000) NOT NULL DEFAULT '',
+  created_by   INT NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_customers_full_name (full_name),
+  INDEX idx_customers_company (company_name),
+  CONSTRAINT fk_customer_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS products (
-  id                 SERIAL PRIMARY KEY,
-  name               VARCHAR(200) NOT NULL,
-  stone_category     VARCHAR(50) NOT NULL
-                     CHECK (stone_category IN ('Granite','Marble','Quartz','Quartzite','Travertine')),
-  stone_color        VARCHAR(100) NOT NULL,
-  finish             VARCHAR(50) NOT NULL
-                     CHECK (finish IN ('Polished','Honed','Leathered','Flamed','Brushed')),
-  thickness_options  INTEGER[] NOT NULL,
-  default_unit_price NUMERIC(14,2) NOT NULL CHECK (default_unit_price >= 0),
-  status             VARCHAR(20) NOT NULL DEFAULT 'active'
-                     CHECK (status IN ('active','inactive')),
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT products_thickness_not_empty CHECK (array_length(thickness_options, 1) >= 1)
-);
-CREATE INDEX IF NOT EXISTS idx_products_name ON products(lower(name));
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(stone_category);
+  id                     INT AUTO_INCREMENT PRIMARY KEY,
+  name                   VARCHAR(200) NOT NULL,
+  stone_category         ENUM('Granite','Marble','Quartz','Quartzite','Travertine','Limestone') NOT NULL,
+  stone_color            VARCHAR(100) NOT NULL,
+  finish                 ENUM('Polished','Honed','Leathered','Flamed','Brushed') NOT NULL,
+  thickness_options      JSON NOT NULL,
+  default_unit_price     DECIMAL(14,2) NOT NULL,
+  status                 ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  allows_direct_approval TINYINT(1) NOT NULL DEFAULT 0,
+  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_products_name (name),
+  INDEX idx_products_category (stone_category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS proformas (
-  id                     SERIAL PRIMARY KEY,
+  id                     INT AUTO_INCREMENT PRIMARY KEY,
   proforma_number        VARCHAR(50) NOT NULL UNIQUE,
-  customer_id            INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
-  sales_person_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  issue_date             DATE NOT NULL DEFAULT CURRENT_DATE,
+  customer_id            INT NOT NULL,
+  sales_person_id        INT NOT NULL,
+  issue_date             DATE NOT NULL,
   expiry_date            DATE NOT NULL,
-  subtotal               NUMERIC(14,2) NOT NULL DEFAULT 0,
-  discount               NUMERIC(14,2) NOT NULL DEFAULT 0,
-  vat_rate               NUMERIC(5,2) NOT NULL DEFAULT 15,
-  vat_amount             NUMERIC(14,2) NOT NULL DEFAULT 0,
-  grand_total            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  subtotal               DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount               DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_rate               DECIMAL(5,2) NOT NULL DEFAULT 15,
+  vat_amount             DECIMAL(14,2) NOT NULL DEFAULT 0,
+  grand_total            DECIMAL(14,2) NOT NULL DEFAULT 0,
   payment_terms          VARCHAR(500) NOT NULL DEFAULT '',
   delivery_time          VARCHAR(300) NOT NULL DEFAULT '',
   validity_period        VARCHAR(300) NOT NULL DEFAULT '',
-  notes                  TEXT NOT NULL DEFAULT '',
-  status                 VARCHAR(30) NOT NULL DEFAULT 'pending'
-                         CHECK (status IN ('draft','pending','supervisor_approved','rejected','approved')),
+  notes                  VARCHAR(2000) NOT NULL DEFAULT '',
+  status                 ENUM('draft','pending','supervisor_approved','rejected','approved') NOT NULL DEFAULT 'pending',
   rejection_reason       VARCHAR(1000) NOT NULL DEFAULT '',
-  supervisor_approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  supervisor_approved_at TIMESTAMPTZ,
-  admin_approved_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  admin_approved_at      TIMESTAMPTZ,
-  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_proformas_sales_person ON proformas(sales_person_id);
-CREATE INDEX IF NOT EXISTS idx_proformas_status ON proformas(status);
-CREATE INDEX IF NOT EXISTS idx_proformas_created_at ON proformas(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_proformas_customer ON proformas(customer_id);
+  supervisor_approved_by INT NULL,
+  supervisor_approved_at DATETIME NULL DEFAULT NULL,
+  admin_approved_by      INT NULL,
+  admin_approved_at      DATETIME NULL DEFAULT NULL,
+  order_number           VARCHAR(50) NOT NULL DEFAULT '',
+  material_type          VARCHAR(200) NOT NULL DEFAULT '',
+  ordered_by             VARCHAR(200) NOT NULL DEFAULT '',
+  ordered_date           DATE NULL DEFAULT NULL,
+  project_name           VARCHAR(200) NOT NULL DEFAULT '',
+  total_weight           VARCHAR(100) NOT NULL DEFAULT '',
+  remark                 VARCHAR(1000) NOT NULL DEFAULT '',
+  auto_approved          TINYINT(1) NOT NULL DEFAULT 0,
+  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_proformas_sales_person (sales_person_id),
+  INDEX idx_proformas_status (status),
+  INDEX idx_proformas_created_at (created_at),
+  INDEX idx_proformas_customer (customer_id),
+  CONSTRAINT fk_proforma_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_proforma_sales FOREIGN KEY (sales_person_id) REFERENCES users(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_proforma_sup FOREIGN KEY (supervisor_approved_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_proforma_admin FOREIGN KEY (admin_approved_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Product details are denormalized so a proforma stays accurate if the catalog changes.
 CREATE TABLE IF NOT EXISTS proforma_items (
-  id             SERIAL PRIMARY KEY,
-  proforma_id    INTEGER NOT NULL REFERENCES proformas(id) ON DELETE CASCADE,
-  product_id     INTEGER REFERENCES products(id) ON DELETE SET NULL,
-  product_name   VARCHAR(200) NOT NULL,
-  stone_category VARCHAR(50) NOT NULL,
-  stone_color    VARCHAR(100) NOT NULL,
-  finish         VARCHAR(50) NOT NULL,
-  width          NUMERIC(10,3) NOT NULL CHECK (width > 0),
-  height         NUMERIC(10,3) NOT NULL CHECK (height > 0),
-  area           NUMERIC(12,2) NOT NULL CHECK (area >= 0),
-  thickness      INTEGER NOT NULL,
-  quantity       INTEGER NOT NULL CHECK (quantity > 0),
-  unit_price     NUMERIC(14,2) NOT NULL CHECK (unit_price >= 0),
-  line_total     NUMERIC(14,2) NOT NULL CHECK (line_total >= 0),
-  sort_order     INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_proforma_items_proforma ON proforma_items(proforma_id);
-CREATE INDEX IF NOT EXISTS idx_proforma_items_product ON proforma_items(product_id);
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  proforma_id    INT NOT NULL,
+  product_id     INT NULL,
+  product_name   VARCHAR(200) NULL,
+  stone_category VARCHAR(50) NULL,
+  stone_color    VARCHAR(100) NULL,
+  finish         VARCHAR(50) NULL,
+  item_type      ENUM('area','linear') NOT NULL DEFAULT 'area',
+  description    VARCHAR(200) NOT NULL DEFAULT '',
+  length         DECIMAL(10,3) NOT NULL,
+  width          DECIMAL(10,3) NULL,
+  area           DECIMAL(14,4) NOT NULL DEFAULT 0,
+  total_length   DECIMAL(14,3) NOT NULL DEFAULT 0,
+  thickness      DECIMAL(6,1) NULL,
+  quantity       INT NOT NULL,
+  unit_price     DECIMAL(14,2) NOT NULL,
+  line_total     DECIMAL(14,2) NOT NULL,
+  remark         VARCHAR(300) NOT NULL DEFAULT '',
+  sort_order     INT NOT NULL DEFAULT 0,
+  INDEX idx_items_proforma (proforma_id),
+  INDEX idx_items_product (product_id),
+  CONSTRAINT fk_item_proforma FOREIGN KEY (proforma_id) REFERENCES proformas(id) ON DELETE CASCADE,
+  CONSTRAINT fk_item_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS approval_history (
-  id          SERIAL PRIMARY KEY,
-  proforma_id INTEGER NOT NULL REFERENCES proformas(id) ON DELETE CASCADE,
-  action      VARCHAR(40) NOT NULL
-              CHECK (action IN ('created','submitted','updated','supervisor_approved',
-                                'admin_approved','rejected','reverted_to_draft')),
-  actor_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  proforma_id INT NOT NULL,
+  action      ENUM('created','submitted','updated','supervisor_approved','admin_approved','rejected','reverted_to_draft','auto_approved') NOT NULL,
+  actor_id    INT NULL,
   comment     VARCHAR(1000) NOT NULL DEFAULT '',
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_approval_history_proforma ON approval_history(proforma_id, created_at);
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_history_proforma (proforma_id, created_at),
+  CONSTRAINT fk_history_proforma FOREIGN KEY (proforma_id) REFERENCES proformas(id) ON DELETE CASCADE,
+  CONSTRAINT fk_history_actor FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS notifications (
-  id          SERIAL PRIMARY KEY,
-  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type        VARCHAR(50) NOT NULL
-              CHECK (type IN ('proforma_submitted','proforma_supervisor_approved',
-                              'proforma_admin_approved','proforma_rejected')),
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  user_id     INT NOT NULL,
+  type        ENUM('proforma_submitted','proforma_supervisor_approved','proforma_admin_approved','proforma_rejected','proforma_auto_approved') NOT NULL,
   message     VARCHAR(500) NOT NULL,
-  proforma_id INTEGER REFERENCES proformas(id) ON DELETE CASCADE,
-  read        BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at DESC);
+  proforma_id INT NULL,
+  `read`      TINYINT(1) NOT NULL DEFAULT 0,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_notifications_user (user_id, `read`, created_at),
+  CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notif_proforma FOREIGN KEY (proforma_id) REFERENCES proformas(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Single-row table holding company/system settings.
+-- Single-row company/system settings.
 CREATE TABLE IF NOT EXISTS settings (
-  key                   VARCHAR(20) PRIMARY KEY DEFAULT 'global',
+  `key`                 VARCHAR(20) PRIMARY KEY,
   company_name          VARCHAR(200) NOT NULL DEFAULT 'Granite Factory PLC',
   company_address       VARCHAR(500) NOT NULL DEFAULT '',
   company_phone         VARCHAR(50) NOT NULL DEFAULT '',
   company_email         VARCHAR(200) NOT NULL DEFAULT '',
   company_website       VARCHAR(200) NOT NULL DEFAULT '',
-  logo_url              TEXT NOT NULL DEFAULT '',
+  logo_url              LONGTEXT NULL,
   currency              VARCHAR(10) NOT NULL DEFAULT 'ETB',
-  default_vat_rate      NUMERIC(5,2) NOT NULL DEFAULT 15,
+  default_vat_rate      DECIMAL(5,2) NOT NULL DEFAULT 15,
   default_payment_terms VARCHAR(500) NOT NULL DEFAULT '50% advance, 50% on delivery',
-  default_validity_days INTEGER NOT NULL DEFAULT 30,
+  default_validity_days INT NOT NULL DEFAULT 30,
   proforma_prefix       VARCHAR(10) NOT NULL DEFAULT 'PF',
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  terms_and_conditions  TEXT NULL,
+  products_offered      TEXT NULL,
+  bank_details          TEXT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Per-year proforma sequence, incremented atomically.
 CREATE TABLE IF NOT EXISTS counters (
-  key VARCHAR(50) PRIMARY KEY,
-  seq INTEGER NOT NULL DEFAULT 0
-);
+  `key` VARCHAR(50) PRIMARY KEY,
+  seq   INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -94,11 +94,11 @@ async function seed() {
     console.log(`  product: ${p.name}`);
   }
 
-  const { rows } = await query('SELECT id FROM users WHERE email = $1', ['sales@granite.com']);
+  const rows = await query('SELECT id FROM users WHERE email = ?', ['sales@granite.com']);
   const salesUserId = rows[0].id;
 
   for (const c of CUSTOMERS) {
-    const { rows: existing } = await query('SELECT 1 FROM customers WHERE phone = $1', [c.phone]);
+    const existing = await query('SELECT 1 FROM customers WHERE phone = ?', [c.phone]);
     if (existing.length) continue;
     await customerModel.create(c, salesUserId);
     console.log(`  customer: ${c.fullName}`);

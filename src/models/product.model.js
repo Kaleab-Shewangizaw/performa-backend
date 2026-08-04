@@ -4,35 +4,49 @@ const { mapRow, mapRows } = require('../utils/rowMapper');
 const COLUMNS = `id, name, stone_category, stone_color, finish, thickness_options,
                  default_unit_price, status, allows_direct_approval, created_at, updated_at`;
 
+// thickness_options is JSON; MariaDB returns it as a string, so parse it.
+function mapProduct(row) {
+  const p = mapRow(row);
+  if (!p) return null;
+  if (typeof p.thicknessOptions === 'string') {
+    p.thicknessOptions = JSON.parse(p.thicknessOptions);
+  }
+  return p;
+}
+
+function mapProducts(rows) {
+  return rows.map(mapProduct);
+}
+
 async function create(data) {
-  const { rows } = await query(
+  const res = await query(
     `INSERT INTO products
        (name, stone_category, stone_color, finish, thickness_options, default_unit_price, status,
         allows_direct_approval)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING ${COLUMNS}`,
+     VALUES (?,?,?,?,?,?,?,?)`,
     [
       data.name, data.stoneCategory, data.stoneColor, data.finish,
-      data.thicknessOptions, data.defaultUnitPrice, data.status, data.allowsDirectApproval,
+      JSON.stringify(data.thicknessOptions), data.defaultUnitPrice, data.status,
+      data.allowsDirectApproval ? 1 : 0,
     ]
   );
-  return mapRow(rows[0]);
+  return findById(res.insertId);
 }
 
 async function findById(id) {
-  const { rows } = await query(`SELECT ${COLUMNS} FROM products WHERE id = $1`, [id]);
-  return mapRow(rows[0]);
+  const rows = await query(`SELECT ${COLUMNS} FROM products WHERE id = ?`, [id]);
+  return mapProduct(rows[0]);
 }
 
 async function findByIds(ids) {
   if (!ids.length) return [];
-  const { rows } = await query(`SELECT ${COLUMNS} FROM products WHERE id = ANY($1::int[])`, [ids]);
-  return mapRows(rows);
+  const rows = await query(`SELECT ${COLUMNS} FROM products WHERE id IN (?)`, [ids]);
+  return mapProducts(rows);
 }
 
 async function findByName(name) {
-  const { rows } = await query(`SELECT ${COLUMNS} FROM products WHERE name = $1`, [name]);
-  return mapRow(rows[0]);
+  const rows = await query(`SELECT ${COLUMNS} FROM products WHERE name = ?`, [name]);
+  return mapProduct(rows[0]);
 }
 
 async function list({ search, stoneCategory, finish, status, sort, limit, offset }) {
@@ -40,69 +54,58 @@ async function list({ search, stoneCategory, finish, status, sort, limit, offset
   const params = [];
 
   if (stoneCategory) {
+    conditions.push('stone_category = ?');
     params.push(stoneCategory);
-    conditions.push(`stone_category = $${params.length}`);
   }
   if (finish) {
+    conditions.push('finish = ?');
     params.push(finish);
-    conditions.push(`finish = $${params.length}`);
   }
   if (status) {
+    conditions.push('status = ?');
     params.push(status);
-    conditions.push(`status = $${params.length}`);
   }
   if (search) {
-    params.push(`%${search}%`);
-    const p = `$${params.length}`;
-    conditions.push(`(name ILIKE ${p} OR stone_color ILIKE ${p})`);
+    conditions.push('(name LIKE ? OR stone_color LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const { rows: countRows } = await query(
-    `SELECT COUNT(*)::int AS total FROM products ${where}`,
-    params
+  const countRows = await query(`SELECT COUNT(*) AS total FROM products ${where}`, params);
+  const rows = await query(
+    `SELECT ${COLUMNS} FROM products ${where} ORDER BY ${sort} LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
   );
-
-  params.push(limit, offset);
-  const { rows } = await query(
-    `SELECT ${COLUMNS} FROM products ${where}
-     ORDER BY ${sort} LIMIT $${params.length - 1} OFFSET $${params.length}`,
-    params
-  );
-  return { data: mapRows(rows), total: countRows[0].total };
+  return { data: mapProducts(rows), total: countRows[0].total };
 }
 
 async function update(id, data) {
-  const { rows } = await query(
+  await query(
     `UPDATE products SET
-       name = $2, stone_category = $3, stone_color = $4, finish = $5,
-       thickness_options = $6, default_unit_price = $7, status = $8,
-       allows_direct_approval = $9, updated_at = now()
-     WHERE id = $1
-     RETURNING ${COLUMNS}`,
+       name = ?, stone_category = ?, stone_color = ?, finish = ?,
+       thickness_options = ?, default_unit_price = ?, status = ?, allows_direct_approval = ?
+     WHERE id = ?`,
     [
-      id, data.name, data.stoneCategory, data.stoneColor, data.finish,
-      data.thicknessOptions, data.defaultUnitPrice, data.status, data.allowsDirectApproval,
+      data.name, data.stoneCategory, data.stoneColor, data.finish,
+      JSON.stringify(data.thicknessOptions), data.defaultUnitPrice, data.status,
+      data.allowsDirectApproval ? 1 : 0, id,
     ]
   );
-  return mapRow(rows[0]);
+  return findById(id);
 }
 
 async function setStatus(id, status) {
-  const { rows } = await query(
-    `UPDATE products SET status = $2, updated_at = now() WHERE id = $1 RETURNING ${COLUMNS}`,
-    [id, status]
-  );
-  return mapRow(rows[0]);
+  await query('UPDATE products SET status = ? WHERE id = ?', [status, id]);
+  return findById(id);
 }
 
 async function remove(id) {
-  const { rowCount } = await query('DELETE FROM products WHERE id = $1', [id]);
-  return rowCount > 0;
+  const res = await query('DELETE FROM products WHERE id = ?', [id]);
+  return res.affectedRows > 0;
 }
 
 async function isUsedInProformas(id) {
-  const { rows } = await query('SELECT 1 FROM proforma_items WHERE product_id = $1 LIMIT 1', [id]);
+  const rows = await query('SELECT 1 FROM proforma_items WHERE product_id = ? LIMIT 1', [id]);
   return rows.length > 0;
 }
 

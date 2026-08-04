@@ -1,38 +1,62 @@
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 const env = require('./env');
 
-// Managed PostgreSQL (e.g. cPanel) often requires SSL for TCP connections but
-// serves a self-signed cert, so verification is disabled. Enable with
-// DB_SSL=true, or equivalently put ?sslmode=no-verify on DATABASE_URL.
-const poolConfig = { connectionString: env.databaseUrl };
-if (env.dbSsl) {
-  poolConfig.ssl = { rejectUnauthorized: false };
+// Builds the pool config from DATABASE_URL (mysql://user:pass@host:port/db).
+// On cPanel, MySQL users are granted @'localhost', which matches SOCKET
+// connections — set DB_SOCKET_PATH to connect that way; locally we use TCP.
+function poolConfig() {
+  const url = new URL(env.databaseUrl);
+  const cfg = {
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, ''),
+    charset: 'utf8mb4',
+    waitForConnections: true,
+    connectionLimit: 10,
+    maxIdle: 10,
+    idleTimeout: 60000,
+    enableKeepAlive: true,
+  };
+  if (env.dbSocketPath) {
+    cfg.socketPath = env.dbSocketPath;
+  } else {
+    cfg.host = url.hostname || '127.0.0.1';
+    cfg.port = url.port ? Number(url.port) : 3306;
+  }
+  return cfg;
 }
 
-const pool = new Pool(poolConfig);
+const pool = mysql.createPool(poolConfig());
 
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle Postgres client', err);
-});
+// Runs a query and returns the first element of mysql2's [result, fields]:
+// a rows array for SELECT, or a ResultSetHeader (insertId/affectedRows) for
+// INSERT/UPDATE/DELETE.
+async function query(sql, params = []) {
+  const [result] = await pool.query(sql, params);
+  return result;
+}
 
-// Runs `fn` inside a transaction, rolling back on any throw.
+// Runs `fn` inside a transaction. `fn` receives a `tx` with the same
+// query(sql, params) -> result contract, bound to the transaction connection.
 async function withTransaction(fn) {
-  const client = await pool.connect();
+  const conn = await pool.getConnection();
   try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
+    await conn.beginTransaction();
+    const tx = {
+      query: async (sql, params = []) => {
+        const [result] = await conn.query(sql, params);
+        return result;
+      },
+    };
+    const out = await fn(tx);
+    await conn.commit();
+    return out;
   } catch (err) {
-    await client.query('ROLLBACK');
+    await conn.rollback();
     throw err;
   } finally {
-    client.release();
+    conn.release();
   }
 }
 
-module.exports = {
-  pool,
-  query: (text, params) => pool.query(text, params),
-  withTransaction,
-};
+module.exports = { pool, query, withTransaction };

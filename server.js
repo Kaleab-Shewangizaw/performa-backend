@@ -13,5 +13,5 @@ app.listen(env.port, () => {
 // Advisory connectivity check — logs status but never crashes the process.
 pool
   .query('SELECT 1')
-  .then(() => console.log('Connected to PostgreSQL'))
-  .catch((err) => console.error('WARNING: PostgreSQL not reachable yet —', err.message));
+  .then(() => console.log('Connected to the database'))
+  .catch((err) => console.error('WARNING: database not reachable yet —', err.message));
