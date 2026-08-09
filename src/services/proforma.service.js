@@ -5,6 +5,7 @@ const customerModel = require('../models/customer.model');
 const settingModel = require('../models/setting.model');
 const approvalHistoryModel = require('../models/approvalHistory.model');
 const notificationService = require('./notification.service');
+const orderTrackingService = require('./orderTracking.service');
 const { EDIT_RULES } = require('../utils/constants');
 
 function round2(n) {
@@ -196,6 +197,8 @@ async function recordAutoApproval(proforma, user) {
     message: `Proforma ${proforma.proformaNumber} was approved automatically (pre-approved products)`,
     proformaId: proforma.id,
   });
+  // Auto-approval is a system decision — no human actor.
+  await orderTrackingService.startTracking(proforma.id, null);
 }
 
 // Admin may edit at any stage. Sales are limited to their own, pre-approval.
@@ -335,6 +338,8 @@ async function adminApprove(proforma, user, comment) {
     message: `Proforma ${proforma.proformaNumber} received final approval`,
     proformaId: proforma.id,
   });
+  // Approved proforma becomes an order — hand it to the factory pipeline.
+  await orderTrackingService.startTracking(proforma.id, user.id);
   return updated;
 }
 
@@ -346,6 +351,7 @@ async function reject(proforma, user, reason) {
   if (!rejectable.includes(proforma.status)) {
     throw new ApiError(400, `Cannot reject a proforma in "${proforma.status}" status`);
   }
+  const wasApproved = proforma.status === 'approved';
 
   const updated = await proformaModel.updateStatus(proforma.id, {
     status: 'rejected',
@@ -364,6 +370,10 @@ async function reject(proforma, user, reason) {
     message: `Proforma ${proforma.proformaNumber} was rejected: ${reason}`,
     proformaId: proforma.id,
   });
+  // Rejecting an order already in production pulls it back out of the pipeline.
+  if (wasApproved) {
+    await orderTrackingService.stopTracking(proforma.id, user.id, `Rejected: ${reason}`);
+  }
   return updated;
 }
 

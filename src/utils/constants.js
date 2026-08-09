@@ -1,4 +1,16 @@
-const ROLES = ['sales', 'supervisor', 'admin'];
+const ROLES = ['sales', 'supervisor', 'admin', 'factory'];
+
+// Default production pipeline seeded in migration 002. Kept here only for
+// reference/reseeding; the live list is admin-editable in the order_steps table.
+const DEFAULT_ORDER_STEPS = [
+  'Ordered',
+  'Sent to factory',
+  'Cutting',
+  'Polishing',
+  'Quality check',
+  'Ready for delivery',
+  'Delivered',
+];
 
 const PROFORMA_STATUSES = [
   'draft',
@@ -73,6 +85,7 @@ const EDIT_RULES = {
 
 module.exports = {
   ROLES,
+  DEFAULT_ORDER_STEPS,
   PROFORMA_STATUSES,
   EDITABLE_STATUSES,
   EDIT_RULES,
