@@ -17,12 +17,15 @@ const SELECT_WITH_RELATIONS = `
          CASE WHEN sa.id IS NULL THEN NULL
               ELSE JSON_OBJECT('id', sa.id, 'name', sa.name, 'email', sa.email) END AS supervisor_json,
          CASE WHEN aa.id IS NULL THEN NULL
-              ELSE JSON_OBJECT('id', aa.id, 'name', aa.name, 'email', aa.email) END AS admin_json
+              ELSE JSON_OBJECT('id', aa.id, 'name', aa.name, 'email', aa.email) END AS admin_json,
+         CASE WHEN cs.id IS NULL THEN NULL
+              ELSE JSON_OBJECT('id', cs.id, 'name', cs.name) END AS current_step_json
     FROM proformas p
     JOIN customers c ON c.id = p.customer_id
     JOIN users sp ON sp.id = p.sales_person_id
     LEFT JOIN users sa ON sa.id = p.supervisor_approved_by
     LEFT JOIN users aa ON aa.id = p.admin_approved_by
+    LEFT JOIN order_steps cs ON cs.id = p.current_step_id
 `;
 
 function parseJson(v) {
@@ -36,10 +39,12 @@ function shape(row, items) {
   p.salesPerson = parseJson(p.salesPersonJson);
   p.supervisorApprovedBy = parseJson(p.supervisorJson);
   p.adminApprovedBy = parseJson(p.adminJson);
+  p.currentStep = parseJson(p.currentStepJson);
   delete p.customerJson;
   delete p.salesPersonJson;
   delete p.supervisorJson;
   delete p.adminJson;
+  delete p.currentStepJson;
   p.items = items || [];
   return p;
 }
@@ -224,6 +229,31 @@ async function remove(id) {
   return res.affectedRows > 0;
 }
 
+// Moves the order's tracking pointer. Pass null to clear it (e.g. when an
+// approved order is rejected back out of production).
+async function setCurrentStep(id, stepId) {
+  await query('UPDATE proformas SET current_step_id = ? WHERE id = ?', [stepId, id]);
+  return findById(id);
+}
+
+// Minimal row for the public tracking lookup: enough to verify the phone and
+// render a status, and nothing more. Matches on the proforma number, or on a
+// non-empty order number. The customer phone is returned for verification only
+// — the tracking service compares it and never exposes it.
+async function findByNumberForTracking(number) {
+  const rows = await query(
+    `SELECT p.id, p.proforma_number, p.order_number, p.project_name, p.status,
+            p.current_step_id, p.updated_at, c.phone AS customer_phone
+       FROM proformas p
+       JOIN customers c ON c.id = p.customer_id
+      WHERE p.proforma_number = ?
+         OR (p.order_number <> '' AND p.order_number = ?)
+      LIMIT 1`,
+    [number, number]
+  );
+  return mapRow(rows[0]);
+}
+
 // Atomic per-year sequence via the LAST_INSERT_ID() trick.
 async function nextNumber(prefix, year) {
   const res = await query(
@@ -292,6 +322,8 @@ module.exports = {
   replaceItemsAndTotals,
   updateStatus,
   remove,
+  setCurrentStep,
+  findByNumberForTracking,
   nextNumber,
   statusCounts,
   approvedRevenue,

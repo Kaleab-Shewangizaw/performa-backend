@@ -37,6 +37,7 @@ const USERS = [
   { name: 'Admin User', email: 'admin@granite.com', password: 'admin1234', role: 'admin' },
   { name: 'Sami Supervisor', email: 'supervisor@granite.com', password: 'super1234', role: 'supervisor' },
   { name: 'Sara Sales', email: 'sales@granite.com', password: 'sales1234', role: 'sales' },
+  { name: 'Fikru Factory', email: 'factory@granite.com', password: 'factory1234', role: 'factory' },
 ];
 
 // `allowsDirectApproval` marks stock lines a sales person may quote without
