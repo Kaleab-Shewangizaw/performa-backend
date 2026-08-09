@@ -13,11 +13,12 @@ const SORTABLE = {
   createdAt: 'p.created_at',
 };
 
-// An order is an approved proforma. Anything not yet approved is not an order,
-// so the factory queue never exposes it.
-async function findApprovedOrder(id) {
+// A factory order is an approved proforma that has been sent to the factory
+// (current_step_id set). Approved-but-not-sent proformas are not yet on the
+// floor, so the factory queue never exposes them.
+async function findSentOrder(id) {
   const proforma = await proformaModel.findById(id);
-  if (!proforma || proforma.status !== 'approved') {
+  if (!proforma || proforma.status !== 'approved' || !proforma.currentStepId) {
     throw new ApiError(404, 'Order not found');
   }
   return proforma;
@@ -29,6 +30,7 @@ const list = asyncHandler(async (req, res) => {
 
   const { data, total } = await proformaModel.list({
     status: 'approved',
+    sentToFactory: true,
     customerId: req.query.customer,
     search: req.query.q,
     sort,
@@ -43,18 +45,18 @@ const list = asyncHandler(async (req, res) => {
 });
 
 const getOne = asyncHandler(async (req, res) => {
-  const order = await findApprovedOrder(req.params.id);
+  const order = await findSentOrder(req.params.id);
   res.json({ order: toOrderView(order) });
 });
 
 const timeline = asyncHandler(async (req, res) => {
-  const order = await findApprovedOrder(req.params.id);
+  const order = await findSentOrder(req.params.id);
   const history = await stepHistoryModel.listForProforma(order.id);
   res.json({ timeline: history });
 });
 
 const setStep = asyncHandler(async (req, res) => {
-  const order = await findApprovedOrder(req.params.id);
+  const order = await findSentOrder(req.params.id);
   const updated = await orderTrackingService.setStep(
     order,
     req.body.stepId,

@@ -197,8 +197,6 @@ async function recordAutoApproval(proforma, user) {
     message: `Proforma ${proforma.proformaNumber} was approved automatically (pre-approved products)`,
     proformaId: proforma.id,
   });
-  // Auto-approval is a system decision — no human actor.
-  await orderTrackingService.startTracking(proforma.id, null);
 }
 
 // Admin may edit at any stage. Sales are limited to their own, pre-approval.
@@ -338,9 +336,24 @@ async function adminApprove(proforma, user, comment) {
     message: `Proforma ${proforma.proformaNumber} received final approval`,
     proformaId: proforma.id,
   });
-  // Approved proforma becomes an order — hand it to the factory pipeline.
-  await orderTrackingService.startTracking(proforma.id, user.id);
   return updated;
+}
+
+// Admin/supervisor hands an approved proforma to the factory. This is a
+// deliberate step, separate from approval: only sent orders reach the factory
+// queue, and sending is what starts the production pipeline.
+async function sendToFactory(proforma, user) {
+  if (proforma.status !== 'approved') {
+    throw new ApiError(400, 'Only approved proformas can be sent to the factory');
+  }
+  if (proforma.currentStepId) {
+    throw new ApiError(400, 'This order has already been sent to the factory');
+  }
+  const step = await orderTrackingService.startTracking(proforma.id, user.id);
+  if (!step) {
+    throw new ApiError(400, 'No production steps are configured. Add order steps first.');
+  }
+  return proformaModel.findById(proforma.id);
 }
 
 async function reject(proforma, user, reason) {
@@ -384,5 +397,6 @@ module.exports = {
   supervisorApprove,
   adminApprove,
   reject,
+  sendToFactory,
   round2,
 };

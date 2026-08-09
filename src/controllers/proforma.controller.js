@@ -112,6 +112,12 @@ const remove = asyncHandler(async (req, res) => {
   res.status(204).send();
 });
 
+const sendToFactory = asyncHandler(async (req, res) => {
+  const proforma = await findProforma(req.params.id);
+  const updated = await proformaService.sendToFactory(proforma, req.user);
+  res.json({ proforma: updated });
+});
+
 const history = asyncHandler(async (req, res) => {
   const proforma = await findProforma(req.params.id);
   assertCanView(req.user, proforma);
@@ -129,4 +135,4 @@ const pdf = asyncHandler(async (req, res) => {
   await renderProformaPdf(proforma, settings, res);
 });
 
-module.exports = { list, create, getOne, update, submit, approve, reject, remove, history, pdf };
+module.exports = { list, create, getOne, update, submit, approve, reject, sendToFactory, remove, history, pdf };

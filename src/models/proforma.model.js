@@ -109,13 +109,17 @@ async function findItems(proformaId) {
   return mapRows(rows).map(({ productId, ...rest }) => ({ ...rest, product: productId }));
 }
 
-async function list({ salesPersonId, status, customerId, search, from, to, sort, limit, offset }) {
+async function list({ salesPersonId, status, customerId, search, from, to, sentToFactory, sort, limit, offset }) {
   const conditions = [];
   const params = [];
 
   if (salesPersonId) {
     conditions.push('p.sales_person_id = ?');
     params.push(salesPersonId);
+  }
+  // "Sent to factory" = the order has entered the production pipeline.
+  if (sentToFactory) {
+    conditions.push('p.current_step_id IS NOT NULL');
   }
   if (status) {
     conditions.push('p.status = ?');
