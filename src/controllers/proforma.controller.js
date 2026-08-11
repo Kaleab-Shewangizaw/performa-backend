@@ -35,6 +35,7 @@ const list = asyncHandler(async (req, res) => {
   const salesPersonId =
     req.user.role === 'sales' ? req.user.id : req.query.salesPerson || undefined;
 
+  const sent = req.query.sent;
   const { data, total } = await proformaModel.list({
     salesPersonId,
     status: req.query.status,
@@ -42,6 +43,7 @@ const list = asyncHandler(async (req, res) => {
     search: req.query.q,
     from: req.query.from,
     to: req.query.to,
+    sentToFactory: sent === 'true' ? true : sent === 'false' ? false : undefined,
     sort,
     limit,
     offset,
@@ -112,6 +114,12 @@ const remove = asyncHandler(async (req, res) => {
   res.status(204).send();
 });
 
+const sendToFactory = asyncHandler(async (req, res) => {
+  const proforma = await findProforma(req.params.id);
+  const updated = await proformaService.sendToFactory(proforma, req.user);
+  res.json({ proforma: updated });
+});
+
 const history = asyncHandler(async (req, res) => {
   const proforma = await findProforma(req.params.id);
   assertCanView(req.user, proforma);
@@ -129,4 +137,4 @@ const pdf = asyncHandler(async (req, res) => {
   await renderProformaPdf(proforma, settings, res);
 });
 
-module.exports = { list, create, getOne, update, submit, approve, reject, remove, history, pdf };
+module.exports = { list, create, getOne, update, submit, approve, reject, sendToFactory, remove, history, pdf };

@@ -21,6 +21,7 @@ router.put('/:id', requireRole('sales', 'supervisor', 'admin'), validate(proform
 router.post('/:id/submit', requireRole('sales', 'admin'), controller.submit);
 router.post('/:id/approve', requireRole('supervisor', 'admin'), validate(approveSchema), controller.approve);
 router.post('/:id/reject', requireRole('supervisor', 'admin'), validate(rejectSchema), controller.reject);
+router.post('/:id/send-to-factory', requireRole('supervisor', 'admin'), controller.sendToFactory);
 router.delete('/:id', requireRole('sales', 'admin'), controller.remove);
 
 module.exports = router;

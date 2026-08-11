@@ -5,6 +5,8 @@ const customerModel = require('../models/customer.model');
 const settingModel = require('../models/setting.model');
 const approvalHistoryModel = require('../models/approvalHistory.model');
 const notificationService = require('./notification.service');
+const orderTrackingService = require('./orderTracking.service');
+const activityService = require('./activity.service');
 const { EDIT_RULES } = require('../utils/constants');
 
 function round2(n) {
@@ -335,7 +337,39 @@ async function adminApprove(proforma, user, comment) {
     message: `Proforma ${proforma.proformaNumber} received final approval`,
     proformaId: proforma.id,
   });
+  await activityService.record(user.id, 'proforma.approved', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} gave final approval to ${proforma.proformaNumber}`,
+  });
   return updated;
+}
+
+// Admin/supervisor hands an approved proforma to the factory. This is a
+// deliberate step, separate from approval: only sent orders reach the factory
+// queue, and sending is what starts the production pipeline.
+async function sendToFactory(proforma, user) {
+  if (proforma.status !== 'approved') {
+    throw new ApiError(400, 'Only approved proformas can be sent to the factory');
+  }
+  if (proforma.currentStepId) {
+    throw new ApiError(400, 'This order has already been sent to the factory');
+  }
+  const step = await orderTrackingService.startTracking(proforma.id, user.id);
+  if (!step) {
+    throw new ApiError(400, 'No production steps are configured. Add order steps first.');
+  }
+  await notificationService.notifyRole('factory', {
+    type: 'order_sent_to_factory',
+    message: `New order ${proforma.proformaNumber} is ready for production`,
+    proformaId: proforma.id,
+  });
+  await activityService.record(user.id, 'order.sent_to_factory', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} sent ${proforma.proformaNumber} to the factory`,
+  });
+  return proformaModel.findById(proforma.id);
 }
 
 async function reject(proforma, user, reason) {
@@ -346,6 +380,7 @@ async function reject(proforma, user, reason) {
   if (!rejectable.includes(proforma.status)) {
     throw new ApiError(400, `Cannot reject a proforma in "${proforma.status}" status`);
   }
+  const wasApproved = proforma.status === 'approved';
 
   const updated = await proformaModel.updateStatus(proforma.id, {
     status: 'rejected',
@@ -364,6 +399,15 @@ async function reject(proforma, user, reason) {
     message: `Proforma ${proforma.proformaNumber} was rejected: ${reason}`,
     proformaId: proforma.id,
   });
+  // Rejecting an order already in production pulls it back out of the pipeline.
+  if (wasApproved) {
+    await orderTrackingService.stopTracking(proforma.id, user.id, `Rejected: ${reason}`);
+  }
+  await activityService.record(user.id, 'proforma.rejected', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} rejected ${proforma.proformaNumber}: ${reason}`,
+  });
   return updated;
 }
 
@@ -374,5 +418,6 @@ module.exports = {
   supervisorApprove,
   adminApprove,
   reject,
+  sendToFactory,
   round2,
 };
