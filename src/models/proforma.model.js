@@ -118,8 +118,10 @@ async function list({ salesPersonId, status, customerId, search, from, to, sentT
     params.push(salesPersonId);
   }
   // "Sent to factory" = the order has entered the production pipeline.
-  if (sentToFactory) {
+  if (sentToFactory === true) {
     conditions.push('p.current_step_id IS NOT NULL');
+  } else if (sentToFactory === false) {
+    conditions.push('p.current_step_id IS NULL');
   }
   if (status) {
     conditions.push('p.status = ?');

@@ -35,6 +35,7 @@ const list = asyncHandler(async (req, res) => {
   const salesPersonId =
     req.user.role === 'sales' ? req.user.id : req.query.salesPerson || undefined;
 
+  const sent = req.query.sent;
   const { data, total } = await proformaModel.list({
     salesPersonId,
     status: req.query.status,
@@ -42,6 +43,7 @@ const list = asyncHandler(async (req, res) => {
     search: req.query.q,
     from: req.query.from,
     to: req.query.to,
+    sentToFactory: sent === 'true' ? true : sent === 'false' ? false : undefined,
     sort,
     limit,
     offset,

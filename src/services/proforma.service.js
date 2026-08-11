@@ -6,6 +6,7 @@ const settingModel = require('../models/setting.model');
 const approvalHistoryModel = require('../models/approvalHistory.model');
 const notificationService = require('./notification.service');
 const orderTrackingService = require('./orderTracking.service');
+const activityService = require('./activity.service');
 const { EDIT_RULES } = require('../utils/constants');
 
 function round2(n) {
@@ -336,6 +337,11 @@ async function adminApprove(proforma, user, comment) {
     message: `Proforma ${proforma.proformaNumber} received final approval`,
     proformaId: proforma.id,
   });
+  await activityService.record(user.id, 'proforma.approved', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} gave final approval to ${proforma.proformaNumber}`,
+  });
   return updated;
 }
 
@@ -353,6 +359,16 @@ async function sendToFactory(proforma, user) {
   if (!step) {
     throw new ApiError(400, 'No production steps are configured. Add order steps first.');
   }
+  await notificationService.notifyRole('factory', {
+    type: 'order_sent_to_factory',
+    message: `New order ${proforma.proformaNumber} is ready for production`,
+    proformaId: proforma.id,
+  });
+  await activityService.record(user.id, 'order.sent_to_factory', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} sent ${proforma.proformaNumber} to the factory`,
+  });
   return proformaModel.findById(proforma.id);
 }
 
@@ -387,6 +403,11 @@ async function reject(proforma, user, reason) {
   if (wasApproved) {
     await orderTrackingService.stopTracking(proforma.id, user.id, `Rejected: ${reason}`);
   }
+  await activityService.record(user.id, 'proforma.rejected', {
+    entityType: 'proforma',
+    entityId: proforma.id,
+    summary: `${user.name} rejected ${proforma.proformaNumber}: ${reason}`,
+  });
   return updated;
 }
 

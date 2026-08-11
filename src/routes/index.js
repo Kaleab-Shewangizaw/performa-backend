@@ -14,5 +14,6 @@ router.use('/settings', require('./setting.routes'));
 router.use('/order-steps', require('./orderStep.routes'));
 router.use('/orders', require('./order.routes'));
 router.use('/track', require('./tracking.routes'));
+router.use('/activity', require('./activity.routes'));
 
 module.exports = router;

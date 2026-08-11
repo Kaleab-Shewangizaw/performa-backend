@@ -4,18 +4,18 @@ const { mapRows } = require('../utils/rowMapper');
 // changedById is null for system/automatic transitions (e.g. tracking started
 // on approval). step_name is stored as a snapshot so the timeline survives a
 // later rename or delete of the step.
-async function create({ proformaId, stepId, stepName, changedById = null, note = '' }) {
+async function create({ proformaId, stepId, stepName, changedById = null, note = '', reason = '' }) {
   const res = await query(
-    `INSERT INTO order_step_history (proforma_id, step_id, step_name, changed_by, note)
-     VALUES (?, ?, ?, ?, ?)`,
-    [proformaId, stepId, stepName, changedById, note]
+    `INSERT INTO order_step_history (proforma_id, step_id, step_name, changed_by, note, reason)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [proformaId, stepId, stepName, changedById, note, reason]
   );
   return res.insertId;
 }
 
 async function listForProforma(proformaId) {
   const rows = await query(
-    `SELECT h.id, h.proforma_id, h.step_id, h.step_name, h.note, h.created_at,
+    `SELECT h.id, h.proforma_id, h.step_id, h.step_name, h.note, h.reason, h.created_at,
             CASE WHEN u.id IS NULL THEN NULL
                  ELSE JSON_OBJECT('id', u.id, 'name', u.name, 'role', u.role)
             END AS changed_by

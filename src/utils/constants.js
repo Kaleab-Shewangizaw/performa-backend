@@ -74,6 +74,24 @@ const NOTIFICATION_TYPES = [
   'proforma_admin_approved',
   'proforma_rejected',
   'proforma_auto_approved',
+  'order_sent_to_factory',
+  'order_step_requested',
+  'order_step_approved',
+  'order_step_rejected',
+];
+
+const STEP_REQUEST_STATUSES = ['pending', 'approved', 'rejected'];
+
+// Action slugs recorded in the activity_log (for reference; the column is free text).
+const ACTIVITY_ACTIONS = [
+  'proforma.approved',
+  'proforma.rejected',
+  'order.sent_to_factory',
+  'order.step_requested',
+  'order.step_moved',
+  'order.step_reverted',
+  'order.step_request_approved',
+  'order.step_request_rejected',
 ];
 
 // Roles allowed to edit a proforma, and the statuses they may edit it in.
@@ -98,4 +116,6 @@ module.exports = {
   LINEAR_SERVICES,
   APPROVAL_ACTIONS,
   NOTIFICATION_TYPES,
+  STEP_REQUEST_STATUSES,
+  ACTIVITY_ACTIONS,
 };

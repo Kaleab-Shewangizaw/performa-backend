@@ -2,6 +2,7 @@ const ApiError = require('../utils/apiError');
 const asyncHandler = require('../utils/asyncHandler');
 const proformaModel = require('../models/proforma.model');
 const stepHistoryModel = require('../models/orderStepHistory.model');
+const stepRequestModel = require('../models/stepChangeRequest.model');
 const orderTrackingService = require('../services/orderTracking.service');
 const { toOrderView } = require('../utils/orderView');
 const { parsePagination, parseSort, buildPagination } = require('../utils/query');
@@ -46,7 +47,8 @@ const list = asyncHandler(async (req, res) => {
 
 const getOne = asyncHandler(async (req, res) => {
   const order = await findSentOrder(req.params.id);
-  res.json({ order: toOrderView(order) });
+  const pendingRequest = await stepRequestModel.findPendingForProforma(order.id);
+  res.json({ order: { ...toOrderView(order), pendingRequest } });
 });
 
 const timeline = asyncHandler(async (req, res) => {
@@ -55,15 +57,37 @@ const timeline = asyncHandler(async (req, res) => {
   res.json({ timeline: history });
 });
 
+// Factory workers request a move (needs approval); admin/supervisor apply it.
 const setStep = asyncHandler(async (req, res) => {
   const order = await findSentOrder(req.params.id);
-  const updated = await orderTrackingService.setStep(
-    order,
-    req.body.stepId,
-    req.user,
-    req.body.note || ''
-  );
-  res.json({ order: toOrderView(updated) });
+  const { stepId, reason = '', note = '' } = req.body;
+
+  if (req.user.role === 'factory') {
+    const request = await orderTrackingService.requestStep(order, stepId, req.user, { reason });
+    return res.status(202).json({ request, pending: true });
+  }
+  const updated = await orderTrackingService.applyStep(order, stepId, req.user, { reason, note });
+  res.json({ order: toOrderView(updated), pending: false });
 });
 
-module.exports = { list, getOne, timeline, setStep };
+// ---- step-change requests (admin/supervisor approval queue) ----
+
+const listRequests = asyncHandler(async (req, res) => {
+  const { page, limit, offset } = parsePagination(req.query);
+  const { data, total } = await stepRequestModel.listPending({ limit, offset });
+  res.json({ requests: data, pagination: buildPagination({ page, limit, total }) });
+});
+
+const decideRequest = asyncHandler(async (req, res) => {
+  const request = await stepRequestModel.findById(req.params.reqId);
+  if (!request) throw new ApiError(404, 'Request not found');
+
+  const decision = req.body.decision;
+  if (!['approve', 'reject'].includes(decision)) {
+    throw new ApiError(400, 'decision must be "approve" or "reject"');
+  }
+  const updated = await orderTrackingService.decideRequest(request, decision, req.user, req.body.note || '');
+  res.json({ request: updated });
+});
+
+module.exports = { list, getOne, timeline, setStep, listRequests, decideRequest };
