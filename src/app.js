@@ -55,6 +55,17 @@ if (env.nodeEnv !== 'test') {
   app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 }
 
+// API responses must never be cached — not by the browser, a CDN, or the
+// LiteSpeed cache many cPanel servers run. Without this, a create/update
+// writes to the DB but the next read is served from a stale cached copy, so
+// the UI "never changes" (and shows the same stale data to everyone).
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 app.use('/api', routes);
 
 // Single-app deployment: when a built frontend is present, serve it. The API is
