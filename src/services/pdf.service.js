@@ -259,7 +259,7 @@ async function renderProformaPdf(proforma, settings, res) {
     proforma.totalWeight && `Total weight: ${proforma.totalWeight}`,
     proforma.remark,
     proforma.notes,
-    proforma.validityPeriod && `Validity: ${proforma.validityPeriod}`,
+    proforma.expiryDate && `Valid until: ${fmtDate(proforma.expiryDate)}`,
   ].filter(Boolean);
 
   if (remarkLines.length) {
@@ -280,6 +280,12 @@ async function renderProformaPdf(proforma, settings, res) {
         width: colWidth - 80, lineGap: 1.2,
       });
   }
+
+  // Closing line, centred above the signature strip.
+  doc.font('Helvetica-BoldOblique').fontSize(10).fillColor(COLORS.accent)
+    .text('Thank you for working with us!', left, doc.page.height - 82, {
+      width: contentWidth - 80, align: 'center',
+    });
 
   // QR + signatures, pinned to the bottom of whatever page we ended on.
   const qrY = doc.page.height - 112;
