@@ -271,6 +271,25 @@ async function nextNumber(prefix, year) {
   return `${prefix}-${year}-${String(seq).padStart(4, '0')}`;
 }
 
+// Plain running count backing the "Order No." field — no prefix or year, just
+// the next whole number after the last one handed out. Seeded from existing
+// proformas by migration 004 so it continues rather than restarting at 1.
+async function nextOrderNumber() {
+  const res = await query(
+    'INSERT INTO counters (`key`, seq) VALUES (?, LAST_INSERT_ID(1)) ' +
+      'ON DUPLICATE KEY UPDATE seq = LAST_INSERT_ID(seq + 1)',
+    ['order-number']
+  );
+  return String(res.insertId);
+}
+
+// Read-only preview of the next order number, for the create form to display
+// before the proforma actually exists. Does not consume the sequence.
+async function peekNextOrderNumber() {
+  const rows = await query('SELECT seq FROM counters WHERE `key` = ?', ['order-number']);
+  return String((rows[0]?.seq ?? 0) + 1);
+}
+
 // ---- aggregates used by dashboards ----
 
 async function statusCounts(salesPersonId) {
@@ -331,6 +350,8 @@ module.exports = {
   setCurrentStep,
   findByNumberForTracking,
   nextNumber,
+  nextOrderNumber,
+  peekNextOrderNumber,
   statusCounts,
   approvedRevenue,
   monthlyRevenue,

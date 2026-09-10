@@ -12,6 +12,8 @@ router.use(requireAuth);
 
 router.get('/', controller.list);
 router.post('/', requireRole('sales', 'admin'), validate(proformaSchema), controller.create);
+// Registered before '/:id' so it isn't captured as an id by parseId().
+router.get('/next-order-number', controller.nextOrderNumber);
 
 router.use('/:id', parseId());
 router.get('/:id', controller.getOne);
