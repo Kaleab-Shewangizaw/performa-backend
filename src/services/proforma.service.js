@@ -146,6 +146,12 @@ async function createProforma(data, user) {
     settings.proformaPrefix,
     new Date().getFullYear()
   );
+  // Sales used to have to make one up by hand; leaving it blank now gets the
+  // next number in the running sequence instead (see peekNextOrderNumber for
+  // the preview the create form shows before this runs).
+  const orderNumber = data.orderNumber?.trim()
+    ? data.orderNumber.trim()
+    : await proformaModel.nextOrderNumber();
 
   const proforma = await proformaModel.create({
     proformaNumber,
@@ -162,7 +168,7 @@ async function createProforma(data, user) {
     notes: data.notes || '',
     status: data.asDraft ? 'draft' : autoApproved ? 'approved' : 'pending',
     autoApproved,
-    orderNumber: data.orderNumber || '',
+    orderNumber,
     // Falls back to the stone used on the first catalogued line.
     materialType: data.materialType || defaultMaterialType(items),
     orderedBy: data.orderedBy || customer.fullName,
