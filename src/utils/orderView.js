@@ -1,6 +1,8 @@
 // Production view of an approved proforma for factory workers: everything they
 // need to cut and finish the job, with all commercial pricing removed. Money
-// lives only on the sales side; the factory floor never sees it.
+// lives only on the sales side; the factory floor never sees it. Customer
+// contact details are sales/admin/supervisor-only too — a factory worker
+// gets just the name, nothing they could use to contact the customer.
 
 const PROFORMA_MONEY_FIELDS = ['subtotal', 'discount', 'vatRate', 'vatAmount', 'grandTotal'];
 const ITEM_MONEY_FIELDS = ['unitPrice', 'lineTotal'];
@@ -19,6 +21,9 @@ function toOrderView(proforma) {
   if (!proforma) return null;
   const view = omit(proforma, PROFORMA_MONEY_FIELDS);
   view.items = (proforma.items || []).map((item) => omit(item, ITEM_MONEY_FIELDS));
+  if (view.customer) {
+    view.customer = { fullName: view.customer.fullName };
+  }
   return view;
 }
 
