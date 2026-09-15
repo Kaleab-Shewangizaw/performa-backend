@@ -56,6 +56,13 @@ const create = asyncHandler(async (req, res) => {
   res.status(201).json({ proforma });
 });
 
+// Preview only — does not consume the sequence. Lets the create form show the
+// next "Order No." before the proforma actually exists.
+const nextOrderNumber = asyncHandler(async (req, res) => {
+  const nextOrderNumber = await proformaModel.peekNextOrderNumber();
+  res.json({ nextOrderNumber });
+});
+
 const getOne = asyncHandler(async (req, res) => {
   const proforma = await findProforma(req.params.id);
   assertCanView(req.user, proforma);
@@ -137,4 +144,7 @@ const pdf = asyncHandler(async (req, res) => {
   await renderProformaPdf(proforma, settings, res);
 });
 
-module.exports = { list, create, getOne, update, submit, approve, reject, sendToFactory, remove, history, pdf };
+module.exports = {
+  list, create, nextOrderNumber, getOne, update, submit, approve, reject,
+  sendToFactory, remove, history, pdf,
+};

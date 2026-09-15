@@ -175,7 +175,9 @@ async function renderProformaPdf(proforma, settings, res) {
       area: isLinear ? '—' : measure(item.area),
       unitPrice: money(item.unitPrice),
       lineTotal: money(item.lineTotal),
-      remark: item.remark || (isLinear ? 'per linear m' : ''),
+      remark: [item.remark || (isLinear ? 'per linear m' : ''), item.bothSides ? 'both sides' : '']
+        .filter(Boolean)
+        .join(' · '),
     };
   };
 

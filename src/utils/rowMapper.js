@@ -16,7 +16,7 @@ const NUMERIC_COLUMNS = new Set([
 
 // TINYINT(1) columns that should surface as booleans.
 const BOOLEAN_COLUMNS = new Set([
-  'is_active', 'read', 'allows_direct_approval', 'auto_approved',
+  'is_active', 'read', 'allows_direct_approval', 'auto_approved', 'both_sides',
 ]);
 
 function mapRow(row) {
