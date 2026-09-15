@@ -16,6 +16,9 @@ const itemSchema = z.object({
   quantity: z.number().int().positive().max(100000).default(1),
   unitPrice: z.number().nonnegative(),
   remark: z.string().max(300).optional().default(''),
+  // Groove edge work cut on both sides bills double the length; only
+  // meaningful on a linear (no-width) line, ignored otherwise.
+  bothSides: z.boolean().optional().default(false),
 });
 
 const proformaSchema = z.object({

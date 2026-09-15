@@ -30,7 +30,11 @@ module.exports = {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+    // Refresh rotates on every use with a fresh expiry (see auth.controller's
+    // `refresh`), so this is a sliding window: any request within the hour
+    // extends the session, and a full hour with none of them ends it — for
+    // every role, since this is the only session-lifetime control there is.
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '1h',
   },
   bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS) || 10,
   // Folder (relative to the backend root) holding the built frontend. When it

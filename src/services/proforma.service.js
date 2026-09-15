@@ -30,8 +30,11 @@ function round3(n) {
 //                  area        = length x width x qty  (m2, what is billed)
 //                  lineTotal   = area x unitPrice
 //   linear items : edge work (bullnose, groove) billed per metre of edge
-//                  totalLength = length x qty
+//                  totalLength = length x qty x (2 if bothSides)
 //                  lineTotal   = totalLength x unitPrice
+//                  bothSides only means anything here — groove cut on both
+//                  sides of the piece doubles the length; bullnose has no
+//                  such option, so a bullnose line just leaves it unchecked.
 async function buildItems(items, materialProductId = null) {
   // Every line inherits the order's material unless it names its own.
   const resolved = items.map((i) => ({ ...i, productId: i.productId ?? materialProductId }));
@@ -52,9 +55,10 @@ async function buildItems(items, materialProductId = null) {
     }
 
     const quantity = item.quantity || 1;
-    const totalLength = round3(item.length * quantity);
     // No width means the line is edge work billed by the running metre.
     const isLinear = item.width == null || Number(item.width) === 0;
+    const bothSides = isLinear && item.bothSides === true;
+    const totalLength = round3(item.length * quantity * (bothSides ? 2 : 1));
     const area = isLinear ? 0 : round4(item.length * item.width * quantity);
     const unitPrice = item.unitPrice ?? product?.defaultUnitPrice ?? 0;
     const lineTotal = round2((isLinear ? totalLength : area) * unitPrice);
@@ -78,6 +82,7 @@ async function buildItems(items, materialProductId = null) {
       unitPrice,
       lineTotal,
       remark: item.remark || '',
+      bothSides,
     };
   });
 }
@@ -116,6 +121,14 @@ function computeTotals(items, discount, vatRate) {
 
 function toDateOnly(date) {
   return date.toISOString().slice(0, 10);
+}
+
+// Sum of billed area across items (linear/edge-work lines contribute 0).
+// Computed server-side, like every other total, so it's never trusted from
+// the client and survives past the create/edit form — unlike before, when it
+// was only ever calculated in the browser and never saved.
+function computeTotalArea(items) {
+  return round4(items.reduce((sum, i) => sum + (i.area || 0), 0));
 }
 
 // "Harer Granite"-style summary taken from the first catalogued line, used
@@ -175,6 +188,7 @@ async function createProforma(data, user) {
     orderedDate: data.orderedDate || toDateOnly(issueDate),
     projectName: data.projectName || '',
     totalWeight: data.totalWeight || '',
+    totalArea: computeTotalArea(items),
     remark: data.remark || '',
   });
 
@@ -271,6 +285,7 @@ async function updateProforma(proforma, data, user) {
     orderedDate: data.orderedDate || (proforma.orderedDate ? toDateOnly(new Date(proforma.orderedDate)) : null),
     projectName: data.projectName ?? proforma.projectName,
     totalWeight: data.totalWeight ?? proforma.totalWeight,
+    totalArea: computeTotalArea(items),
     remark: data.remark ?? proforma.remark,
   });
 

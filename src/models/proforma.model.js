@@ -3,7 +3,7 @@ const { mapRow, mapRows } = require('../utils/rowMapper');
 
 const ITEM_COLUMNS = `id, item_type, description, product_id, product_name, stone_category,
                       stone_color, finish, length, width, area, total_length, thickness,
-                      quantity, unit_price, line_total, remark`;
+                      quantity, unit_price, line_total, remark, both_sides`;
 
 // Reads join customer/sales-person/approver rows and nest them as JSON objects
 // (with camelCase keys), matching the shape the API has always returned. The
@@ -56,13 +56,13 @@ async function insertItems(tx, proformaId, items) {
       `INSERT INTO proforma_items
          (proforma_id, item_type, description, product_id, product_name, stone_category,
           stone_color, finish, length, width, area, total_length, thickness, quantity,
-          unit_price, line_total, remark, sort_order)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          unit_price, line_total, remark, both_sides, sort_order)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         proformaId, item.itemType, item.description, item.productId, item.productName,
         item.stoneCategory, item.stoneColor, item.finish, item.length, item.width,
         item.area, item.totalLength, item.thickness, item.quantity, item.unitPrice,
-        item.lineTotal, item.remark, order++,
+        item.lineTotal, item.remark, item.bothSides ? 1 : 0, order++,
       ]
     );
   }
@@ -76,14 +76,14 @@ async function create(data) {
           subtotal, discount, vat_rate, vat_amount, grand_total,
           payment_terms, delivery_time, validity_period, notes, status,
           order_number, material_type, ordered_by, ordered_date, project_name,
-          total_weight, remark, auto_approved)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          total_weight, total_area, remark, auto_approved)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         data.proformaNumber, data.customerId, data.salesPersonId, data.issueDate, data.expiryDate,
         data.subtotal, data.discount, data.vatRate, data.vatAmount, data.grandTotal,
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes, data.status,
         data.orderNumber, data.materialType, data.orderedBy, data.orderedDate, data.projectName,
-        data.totalWeight, data.remark, data.autoApproved ? 1 : 0,
+        data.totalWeight, data.totalArea, data.remark, data.autoApproved ? 1 : 0,
       ]
     );
     const proformaId = res.insertId;
@@ -181,7 +181,7 @@ async function replaceItemsAndTotals(id, data) {
          payment_terms = ?, delivery_time = ?, validity_period = ?, notes = ?,
          status = ?, rejection_reason = ?,
          order_number = ?, material_type = ?, ordered_by = ?, ordered_date = ?,
-         project_name = ?, total_weight = ?, remark = ?
+         project_name = ?, total_weight = ?, total_area = ?, remark = ?
        WHERE id = ?`,
       [
         data.customerId, data.issueDate, data.expiryDate,
@@ -189,7 +189,7 @@ async function replaceItemsAndTotals(id, data) {
         data.paymentTerms, data.deliveryTime, data.validityPeriod, data.notes,
         data.status, data.rejectionReason,
         data.orderNumber, data.materialType, data.orderedBy, data.orderedDate,
-        data.projectName, data.totalWeight, data.remark, id,
+        data.projectName, data.totalWeight, data.totalArea, data.remark, id,
       ]
     );
     await tx.query('DELETE FROM proforma_items WHERE proforma_id = ?', [id]);
